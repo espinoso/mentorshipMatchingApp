@@ -40,13 +40,47 @@ st.markdown("""
         background-color: #e9ecef;
         box-shadow: 0 2px 8px rgba(0,0,0,0.1);
     }
+    .mentee-card.selected {
+        background-color: #667eea !important;
+        color: white !important;
+        border-left: 4px solid #5a6fd8 !important;
+        box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3) !important;
+        transform: translateX(5px);
+    }
+    .mentee-button {
+        background: transparent !important;
+        border: none !important;
+        padding: 0 !important;
+        width: 100% !important;
+        text-align: left !important;
+        color: inherit !important;
+    }
+    .mentee-button:hover {
+        background: transparent !important;
+        border: none !important;
+    }
     .match-card {
-        background-color: white;
+        background-color: white !important;
         padding: 1.5rem;
         border-radius: 8px;
         border: 1px solid #dee2e6;
         margin: 1rem 0;
         box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        color: #212529 !important;
+    }
+    .match-card h4 {
+        color: #343a40 !important;
+        font-weight: 600 !important;
+        margin-bottom: 0.75rem !important;
+    }
+    .match-card p {
+        color: #495057 !important;
+        margin-bottom: 0.5rem !important;
+        line-height: 1.5 !important;
+    }
+    .match-card strong {
+        color: #212529 !important;
+        font-weight: 600 !important;
     }
     .percentage-badge {
         display: inline-block;
@@ -559,8 +593,28 @@ def main():
                 
                 for match_data in st.session_state.matches:
                     mentee_id = match_data['mentee_id']
-                    if st.button(f"📋 {mentee_id}", key=f"btn_{mentee_id}"):
-                        st.session_state.selected_mentee = mentee_id
+                    
+                    # Check if this mentee is selected
+                    is_selected = 'selected_mentee' in st.session_state and st.session_state.selected_mentee == mentee_id
+                    
+                    # Create button with conditional styling
+                    button_class = "selected" if is_selected else ""
+                    
+                    # Use columns to create custom styled button
+                    col_btn = st.columns([1])[0]
+                    with col_btn:
+                        st.markdown(f"""
+                        <div class="mentee-card {button_class}">
+                            📋 {mentee_id}
+                        </div>
+                        """, unsafe_allow_html=True)
+                        
+                        # Invisible button overlaid on top
+                        if st.button(f"Select {mentee_id}", key=f"btn_{mentee_id}", 
+                                   help=f"View matches for {mentee_id}",
+                                   use_container_width=True):
+                            st.session_state.selected_mentee = mentee_id
+                            st.rerun()
                 
                 if 'selected_mentee' in st.session_state:
                     selected_mentee = st.session_state.selected_mentee
@@ -582,14 +636,14 @@ def main():
                             
                             st.markdown(f"""
                             <div class="match-card">
-                                <h4>#{match['rank']} - {match['mentor_id']}</h4>
-                                <p>
+                                <h4 style="color: #343a40 !important; font-weight: 600 !important;">#{match['rank']} - {match['mentor_id']}</h4>
+                                <p style="color: #495057 !important;">
                                     <span class="percentage-badge {quality_class}">
                                         {match['match_percentage']}% - {match['match_quality']}
                                     </span>
                                 </p>
-                                <p><strong>Reasoning:</strong></p>
-                                <p>{match['reasoning']}</p>
+                                <p style="color: #212529 !important; font-weight: 600 !important;"><strong>Reasoning:</strong></p>
+                                <p style="color: #495057 !important; line-height: 1.6 !important;">{match['reasoning']}</p>
                             </div>
                             """, unsafe_allow_html=True)
                 else:
