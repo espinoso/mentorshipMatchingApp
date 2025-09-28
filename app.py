@@ -190,35 +190,37 @@ CONSTRAINTS:
 - If the same mentor appears in multiple top recommendations, prioritize based on overall match quality
 
 OUTPUT FORMAT:
-For each mentee, provide a JSON object with:
-{
-  "mentee_id": "mentee_code",
-  "matches": [
-    {
-      "rank": 1,
-      "mentor_id": "mentor_code", 
-      "match_percentage": 85,
-      "match_quality": "Excellent",
-      "reasoning": "Detailed explanation of why this mentor is the best fit..."
-    },
-    {
-      "rank": 2,
-      "mentor_id": "mentor_code",
-      "match_percentage": 78,
-      "match_quality": "Good", 
-      "reasoning": "Explanation of the match strengths and considerations..."
-    },
-    {
-      "rank": 3,
-      "mentor_id": "mentor_code",
-      "match_percentage": 65,
-      "match_quality": "Fair",
-      "reasoning": "Explanation of why this is a viable but less optimal match..."
-    }
-  ]
-}
+Return a JSON array where each element represents one mentee's matches:
+[
+  {
+    "mentee_id": "mentee_code",
+    "matches": [
+      {
+        "rank": 1,
+        "mentor_id": "mentor_code", 
+        "match_percentage": 85,
+        "match_quality": "Excellent",
+        "reasoning": "Detailed explanation of why this mentor is the best fit..."
+      },
+      {
+        "rank": 2,
+        "mentor_id": "mentor_code",
+        "match_percentage": 78,
+        "match_quality": "Good", 
+        "reasoning": "Explanation of the match strengths and considerations..."
+      },
+      {
+        "rank": 3,
+        "mentor_id": "mentor_code",
+        "match_percentage": 65,
+        "match_quality": "Fair",
+        "reasoning": "Explanation of why this is a viable but less optimal match..."
+      }
+    ]
+  }
+]
 
-Provide ONLY valid JSON output with no additional text or explanations outside the JSON structure."""
+Provide ONLY the JSON array with no additional text, explanations, or markdown formatting."""
 
     return prompt
 
@@ -274,38 +276,73 @@ def parse_llm_response(response_text):
             response_text = response_text[7:]
         if response_text.endswith('```'):
             response_text = response_text[:-3]
+        response_text = response_text.strip()
         
         # Try to parse as JSON
         matches = json.loads(response_text)
+        
+        # Validate the structure
+        if isinstance(matches, list):
+            # Check if each item has the expected structure
+            for match_data in matches:
+                if not isinstance(match_data, dict):
+                    raise ValueError("Each match should be a dictionary")
+                if 'mentee_id' not in match_data:
+                    raise ValueError("Missing 'mentee_id' in match data")
+                if 'matches' not in match_data:
+                    raise ValueError("Missing 'matches' in match data")
+                if not isinstance(match_data['matches'], list):
+                    raise ValueError("'matches' should be a list")
+        else:
+            raise ValueError("Response should be a list of matches")
+        
         return matches
-    except json.JSONDecodeError as e:
+        
+    except (json.JSONDecodeError, ValueError) as e:
         st.error(f"Error parsing LLM response: {str(e)}")
         st.text("Raw response:")
-        st.text(response_text)
+        st.text(response_text[:1000] + "..." if len(response_text) > 1000 else response_text)
+        
+        # Try to extract any useful information
+        st.info("💡 The AI response format was unexpected. This can happen with complex data. Try adjusting the prompt or simplifying the input data.")
         return None
 
 def check_mentor_conflicts(matches):
     """Check if any mentor is assigned to more than 2 mentees"""
+    if not matches or not isinstance(matches, list):
+        return []
+    
     mentor_assignments = {}
     conflicts = []
     
-    for match_data in matches:
-        mentee_id = match_data['mentee_id']
-        for match in match_data['matches']:
-            mentor_id = match['mentor_id']
-            if mentor_id not in mentor_assignments:
-                mentor_assignments[mentor_id] = []
-            mentor_assignments[mentor_id].append((mentee_id, match['rank']))
-    
-    for mentor_id, assignments in mentor_assignments.items():
-        if len(assignments) > 2:
-            conflicts.append({
-                'mentor_id': mentor_id,
-                'assignments': assignments,
-                'count': len(assignments)
-            })
-    
-    return conflicts
+    try:
+        for match_data in matches:
+            if not isinstance(match_data, dict) or 'mentee_id' not in match_data or 'matches' not in match_data:
+                continue
+                
+            mentee_id = match_data['mentee_id']
+            for match in match_data['matches']:
+                if not isinstance(match, dict) or 'mentor_id' not in match or 'rank' not in match:
+                    continue
+                    
+                mentor_id = match['mentor_id']
+                if mentor_id not in mentor_assignments:
+                    mentor_assignments[mentor_id] = []
+                mentor_assignments[mentor_id].append((mentee_id, match['rank']))
+        
+        for mentor_id, assignments in mentor_assignments.items():
+            if len(assignments) > 2:
+                conflicts.append({
+                    'mentor_id': mentor_id,
+                    'assignments': assignments,
+                    'count': len(assignments)
+                })
+        
+        return conflicts
+        
+    except Exception as e:
+        st.warning(f"Could not check for conflicts: {str(e)}")
+        return []
 
 def main():
     # Header
