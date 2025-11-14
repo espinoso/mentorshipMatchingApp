@@ -787,8 +787,34 @@ def generate_sample_data():
     
     return pd.DataFrame(mentees_data), pd.DataFrame(mentors_data)
 
-def create_matrix_prompt(use_file_search=False):
+def create_matrix_prompt(use_file_search=False, specialty=None):
     """Create the prompt for generating compatibility matrix"""
+    
+    # Get specialty from session state if not provided
+    if specialty is None:
+        specialty = st.session_state.get('imfahe_specialty', 
+            "IMP-Biomedicine (Biology, Medicine, Pharmacy, Biotechnology or related areas)")
+    
+    # Extract specialty name and fields
+    specialty_name = specialty.split("(")[0].strip()
+    specialty_fields = specialty.split("(")[1].rstrip(")") if "(" in specialty else "various fields"
+    
+    # Create specialty-specific context
+    specialty_context = f"""
+PROGRAM CONTEXT: {specialty_name}
+- You are a coordinator for IMFAHE's International Mentor Program
+- IMFAHE Mission: Global career acceleration through international mentorship
+- Program Focus: {specialty_fields}
+- Goal: Help mentees develop international careers through practical skill transfer and guidance
+- Priority: Mentees need mentors with SPECIFIC, relevant expertise in their specialization
+
+SPECIALIZATION MATCHING RULES:
+- Level 1 (Broad Field): Ensure both are in the program's domain ({specialty_fields})
+- Level 2 (Specialization): Critical - mentor and mentee should have COMPATIBLE specific specializations
+- A mismatch at Level 2 should result in LOW field alignment scores (20-40%), even if Level 1 matches
+- Example: In biomedicine, DO NOT highly match virology ↔ biotechnology unless there's direct overlap
+
+"""
     
     file_search_note = """
 TRAINING DATA:
@@ -799,9 +825,9 @@ TRAINING DATA:
 
 """ if use_file_search else ""
     
-    prompt = f"""You are an expert mentorship coordinator. Evaluate compatibility between ALL mentees and ALL mentors.
+    prompt = f"""You are an expert mentorship coordinator for IMFAHE's International Mentor Program.
 
-{file_search_note}CRITICAL REQUIREMENTS:
+{specialty_context}{file_search_note}CRITICAL REQUIREMENTS:
 - You MUST evaluate EVERY SINGLE mentor with EVERY SINGLE mentee
 - The matrix must be COMPLETE - missing mentors or mentees will break the system
 - Count the mentors and mentees in the data and ensure your output has ALL of them
@@ -812,20 +838,42 @@ TASK: Generate a complete compatibility matrix
 - Base scores on ALL provided data fields
 
 EVALUATION CRITERIA:
-- Field of expertise and specialization alignment (30%)
-- Hard skills compatibility (25%)
-- Career goals alignment with mentor strengths (20%)
-- Language compatibility for effective communication (10%)
-- Geographic/country compatibility for collaboration (5%)
-- Academic vs Industry experience match (5%)
-- Experience level appropriateness (5%)
+- Broad field compatibility (10%) - Both in the program's domain
+- Specific specialization alignment (25%) - Compatible sub-fields (see SPECIALIZATION MATCHING RULES)
+- Technical skills match (20%) - Mentor can teach/guide on mentee's needed skills
+- Career trajectory alignment (15%) - Mentor's career path aligns with mentee's goals
+- International experience value (10%) - Mentor has relevant international experience
+- Language compatibility (10%) - Effective communication capability
+- Practical mentoring capacity (5%) - Mentor can provide hands-on guidance
+- Industry/academic context match (5%) - Aligns with mentee's career direction
 
-SCORING GUIDELINES:
-- 90-100%: Exceptional match - highly aligned on all major factors
-- 75-89%: Strong match - aligned on most critical factors
-- 60-74%: Good match - aligned on several important factors
-- 45-59%: Fair match - some alignment, workable
-- 0-44%: Poor match - minimal alignment
+SCORING GUIDELINES FOR IMFAHE INTERNATIONAL MENTOR PROGRAM:
+- 90-100%: Exceptional match
+  * Specific specialization alignment (same or highly complementary sub-fields)
+  * Mentor can directly guide mentee's research/career path
+  * Strong international experience overlap
+  * Excellent language/communication compatibility
+  
+- 75-89%: Strong match
+  * Related specializations within the program domain
+  * Mentor has relevant skills and experience
+  * Good career trajectory alignment
+  * Solid international/language fit
+  
+- 60-74%: Good match
+  * Same broad field with some specialization overlap
+  * Mentor can provide general career guidance
+  * Acceptable skill/experience match
+  
+- 45-59%: Fair match
+  * Same broad field but limited specialization overlap
+  * Mentor can provide limited specific guidance
+  * USE SPARINGLY - prefer higher matches
+  
+- 0-44%: Poor match
+  * Incompatible specializations (e.g., virology ↔ biotechnology without relevant overlap)
+  * Mentor cannot provide meaningful guidance in mentee's area
+  * AVOID these matches - they don't serve IMFAHE's mission
 
 OUTPUT FORMAT:
 Return ONLY a JSON object (no markdown, no extra text):
@@ -848,29 +896,49 @@ VERIFICATION BEFORE RESPONDING:
 2. Count how many mentees are in the provided data
 3. Ensure your response has exactly that many mentor entries
 4. Ensure each mentor entry has exactly that many mentee scores
+5. For each match scored >70%, verify:
+   - Are their specializations actually compatible? (not just same broad field)
+   - Can the mentor realistically guide the mentee's specific research/career area?
+   - If uncertain, READ their research interests/thesis topics again and score conservatively
 
 IMPORTANT: 
 - Use EXACT codes from the provided data (Code mentor, Code Mentee columns)
 - Include every single mentee-mentor combination
 - DO NOT skip any mentors or mentees
 - DO NOT include reasoning (that comes later)
-- Just percentages for now"""
+- Just percentages for now
+- Remember: This is IMFAHE - focus on international career acceleration, not just academic alignment"""
     return prompt
 
-def create_reasoning_prompt(assignments):
+def create_reasoning_prompt(assignments, specialty=None):
     """Create prompt to get reasoning for specific assignments"""
+    
+    # Get specialty from session state if not provided
+    if specialty is None:
+        specialty = st.session_state.get('imfahe_specialty', 
+            "IMP-Biomedicine (Biology, Medicine, Pharmacy, Biotechnology or related areas)")
+    
+    specialty_name = specialty.split("(")[0].strip()
+    
     assignment_list = "\n".join([f"- {mentee} → {mentor} (score: {score}%)" 
                                   for mentee, mentor, score in assignments])
     
-    prompt = f"""You previously evaluated mentee-mentor compatibility. Now provide brief reasoning for these specific assignments:
+    prompt = f"""You are explaining matches for IMFAHE's International Mentor Program ({specialty_name}).
 
+CONTEXT:
+- IMFAHE Mission: Global career acceleration through international mentorship
+- Focus: Helping mentees develop international careers through practical guidance
+- These assignments were optimally selected considering all mentees and mentors
+
+ASSIGNMENTS TO EXPLAIN:
 {assignment_list}
 
-For each assignment, explain in 2-3 sentences why this is a good match, mentioning:
-- Key skill/expertise alignments
-- Career goal compatibility
-- Any language/geographic advantages
-- Other relevant factors
+For each assignment, provide reasoning in 2-3 sentences, emphasizing:
+- SPECIFIC specialization alignment (not just broad field match)
+- How the mentor can directly guide the mentee's research/career goals
+- International experience relevance
+- Technical skills the mentor can teach/transfer
+- Language/communication compatibility
 
 OUTPUT FORMAT:
 Return ONLY a JSON array (no markdown, no extra text):
@@ -878,7 +946,7 @@ Return ONLY a JSON array (no markdown, no extra text):
   {{
     "mentee_id": "EXACT_CODE",
     "mentor_id": "EXACT_CODE",
-    "reasoning": "Brief 2-3 sentence explanation of why this match works well."
+    "reasoning": "Brief 2-3 sentence explanation focusing on specific specialization alignment and career acceleration value."
   }},
   ...
 ]"""
@@ -1498,6 +1566,41 @@ def hungarian_assignment(matrix_df, max_mentees_per_mentor=2):
     mentors = list(matrix_df.index)
     mentees = list(matrix_df.columns)
     
+    # Validate matrix data
+    st.write("🔍 Validating matrix data...")
+    
+    # Check for NaN values
+    nan_count = matrix_df.isna().sum().sum()
+    if nan_count > 0:
+        st.warning(f"⚠️ Found {nan_count} NaN values in matrix. Replacing with 50% (neutral score)...")
+        matrix_df = matrix_df.fillna(50)
+    
+    # Check for inf values
+    inf_mask = np.isinf(matrix_df.values)
+    if inf_mask.any():
+        inf_count = inf_mask.sum()
+        st.warning(f"⚠️ Found {inf_count} infinite values in matrix. Replacing with 50%...")
+        matrix_df = matrix_df.replace([np.inf, -np.inf], 50)
+    
+    # Check data types - ensure all values are numeric
+    try:
+        matrix_df = matrix_df.astype(float)
+    except Exception as e:
+        st.error(f"❌ Matrix contains non-numeric values: {e}")
+        st.write("Sample of problematic data:")
+        st.write(matrix_df.head())
+        raise ValueError(f"Matrix must contain only numeric values: {e}")
+    
+    # Check value range (should be 0-100)
+    min_val = matrix_df.min().min()
+    max_val = matrix_df.max().max()
+    if min_val < 0 or max_val > 100:
+        st.warning(f"⚠️ Matrix values outside expected range [0, 100]: min={min_val}, max={max_val}")
+        # Clip to valid range
+        matrix_df = matrix_df.clip(0, 100)
+    
+    st.write(f"✅ Matrix validation passed: {len(mentors)} mentors × {len(mentees)} mentees")
+    
     # Create expanded cost matrix to handle mentor capacity constraint
     # Each mentor gets duplicated max_mentees_per_mentor times
     expanded_mentors = []
@@ -1514,7 +1617,16 @@ def hungarian_assignment(matrix_df, max_mentees_per_mentor=2):
             score = matrix_df.loc[actual_mentor, mentee]
             cost_matrix[i, j] = -score  # Negative for maximization
     
+    # Final validation before Hungarian algorithm
+    if not np.isfinite(cost_matrix).all():
+        st.error("❌ Cost matrix still contains invalid values after cleaning")
+        st.write("Cost matrix stats:")
+        st.write(f"- NaN count: {np.isnan(cost_matrix).sum()}")
+        st.write(f"- Inf count: {np.isinf(cost_matrix).sum()}")
+        raise ValueError("Cost matrix contains invalid numeric entries after cleaning")
+    
     # Run Hungarian algorithm
+    st.write("🧮 Running Hungarian algorithm for optimal assignment...")
     mentee_indices, mentor_indices = linear_sum_assignment(cost_matrix)
     
     # Extract assignments
@@ -2026,6 +2138,8 @@ def main():
         st.session_state.model_choice = "gpt-4o-mini"
     if 'reset_counter' not in st.session_state:
         st.session_state.reset_counter = 0
+    if 'imfahe_specialty' not in st.session_state:
+        st.session_state.imfahe_specialty = "IMP-Biomedicine (Biology, Medicine, Pharmacy, Biotechnology or related areas)"
     
     # No sidebar - cleaner interface
     
@@ -2093,6 +2207,44 @@ def main():
                 ⚠️ Please enter your API key to continue
             </div>
             """, unsafe_allow_html=True)
+        
+        st.divider()
+        
+        # IMFAHE Specialty Selection
+        st.subheader("🎓 IMFAHE Program Specialty")
+        
+        st.markdown("""
+        <div class="info-card">
+            Select the IMFAHE International Mentor Program area you're coordinating.<br>
+            This helps the AI understand the domain context for better matching.
+        </div>
+        """, unsafe_allow_html=True)
+        
+        specialty_options = [
+            "IMP-Biomedicine (Biology, Medicine, Pharmacy, Biotechnology or related areas)",
+            "IMP-Engineering (Engineering, Physics, Computing, Architecture or related areas)",
+            "IMP-Business (Finance, Entrepreneurship, Economics, Operations, Marketing or related areas)",
+            "IMP-Behavioral Sciences (Psychology, Sociology, Education or related areas)"
+        ]
+        
+        selected_specialty = st.selectbox(
+            "Choose your program specialty",
+            specialty_options,
+            index=specialty_options.index(st.session_state.imfahe_specialty) if st.session_state.imfahe_specialty in specialty_options else 0,
+            help="Select the specialty area for your mentor-mentee matching program"
+        )
+        
+        if selected_specialty != st.session_state.imfahe_specialty:
+            st.session_state.imfahe_specialty = selected_specialty
+        
+        # Show specialty-specific guidance
+        specialty_short = selected_specialty.split("(")[0].strip()
+        st.markdown(f"""
+        <div class="success-card">
+            ✅ Specialty selected: <strong>{specialty_short}</strong><br>
+            The AI will prioritize domain-specific specialization alignment for this field.
+        </div>
+        """, unsafe_allow_html=True)
         
         st.divider()
         
