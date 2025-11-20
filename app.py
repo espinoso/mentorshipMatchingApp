@@ -6,10 +6,25 @@ import re
 from openai import OpenAI
 from io import BytesIO
 import time
-import tiktoken
 from scipy.optimize import linear_sum_assignment
 import plotly.graph_objects as go
-from datetime import datetime, timedelta
+from datetime import datetime
+
+from info import (
+    MENTEE_COLUMNS, MENTOR_COLUMNS
+)
+
+from ui import (
+    CSS_STYLES
+)
+
+from utils import (
+    validate_uploaded_file, estimate_tokens, fetch_available_models, estimate_api_cost, show_debug_info, clean_dataframe
+)
+
+from prompts import (
+    create_matrix_prompt, create_reasoning_prompt, get_prompt_for_api, create_default_prompt
+)
 
 # Page configuration
 st.set_page_config(
@@ -20,942 +35,277 @@ st.set_page_config(
 )
 
 # Custom CSS for enhanced styling (Improvements: 1, 2, 3, 10, 21, 22)
-st.markdown("""
-<style>
-    /* Import modern font */
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-    
-    /* Global styles */
-    * {
-        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    }
-    
-    /* Improved main header with animation */
-    .main-header {
-        text-align: center;
-        padding: 2rem 0;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
-        color: white;
-        border-radius: 16px;
-        margin-bottom: 2rem;
-        box-shadow: 0 10px 30px rgba(102, 126, 234, 0.3);
-        animation: fadeInDown 0.6s ease-out;
-    }
-    
-    @keyframes fadeInDown {
-        from {
-            opacity: 0;
-            transform: translateY(-20px);
-        }
-        to {
-            opacity: 1;
-            transform: translateY(0);
-        }
-    }
-    
-    .main-header h1 {
-        font-weight: 700;
-        font-size: 2.5rem;
-        margin-bottom: 0.5rem;
-        letter-spacing: -0.02em;
-    }
-    
-    .main-header p {
-        font-weight: 300;
-        font-size: 1.1rem;
-        opacity: 0.95;
-    }
-    
-    /* Sticky header */
-    .sticky-header {
-        position: sticky;
-        top: 0;
-        z-index: 999;
-        background: white;
-        padding: 1rem 0;
-        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-        margin: -1rem -1rem 1rem -1rem;
-        padding-left: 1rem;
-        padding-right: 1rem;
-    }
-    
-    /* Enhanced mentee card */
-    .mentee-card {
-        background: linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%);
-        padding: 1.2rem;
-        border-radius: 12px;
-        border-left: 4px solid #667eea;
-        margin: 0.6rem 0;
-        cursor: pointer;
-        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        box-shadow: 0 2px 8px rgba(0,0,0,0.04);
-        position: relative;
-        overflow: hidden;
-    }
-    
-    .mentee-card::before {
-        content: '';
-        position: absolute;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        opacity: 0;
-        transition: opacity 0.3s ease;
-        z-index: 0;
-    }
-    
-    .mentee-card:hover {
-        transform: translateX(8px) scale(1.02);
-        box-shadow: 0 8px 24px rgba(102, 126, 234, 0.2);
-        border-left-width: 6px;
-    }
-    
-    .mentee-card.selected {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
-        color: white !important;
-        border-left: 6px solid #5a6fd8 !important;
-        box-shadow: 0 8px 32px rgba(102, 126, 234, 0.4) !important;
-        transform: translateX(12px) scale(1.03);
-    }
-    
-    .mentee-card * {
-        position: relative;
-        z-index: 1;
-    }
-    
-    /* Enhanced match card */
-    .match-card {
-        background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%) !important;
-        padding: 1.8rem;
-        border-radius: 16px;
-        border: 2px solid #e9ecef;
-        margin: 1.2rem 0;
-        box-shadow: 0 4px 16px rgba(0,0,0,0.06);
-        color: #212529 !important;
-        transition: all 0.3s ease;
-        animation: slideInRight 0.4s ease-out;
-    }
-    
-    @keyframes slideInRight {
-        from {
-            opacity: 0;
-            transform: translateX(20px);
-        }
-        to {
-            opacity: 1;
-            transform: translateX(0);
-        }
-    }
-    
-    .match-card:hover {
-        box-shadow: 0 8px 28px rgba(0,0,0,0.12);
-        transform: translateY(-4px);
-        border-color: #667eea;
-    }
-    
-    .match-card h4 {
-        color: #2d3748 !important;
-        font-weight: 700 !important;
-        font-size: 1.3rem !important;
-        margin-bottom: 1rem !important;
-        letter-spacing: -0.01em !important;
-    }
-    
-    .match-card p {
-        color: #4a5568 !important;
-        margin-bottom: 0.75rem !important;
-        line-height: 1.7 !important;
-        font-size: 0.95rem !important;
-    }
-    
-    .match-card strong {
-        color: #1a202c !important;
-        font-weight: 600 !important;
-    }
-    
-    /* Enhanced percentage badge with animation */
-    .percentage-badge {
-        display: inline-block;
-        padding: 0.4rem 1rem;
-        border-radius: 24px;
-        font-weight: 600;
-        color: white;
-        font-size: 0.9rem;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-        animation: pulse 2s infinite;
-    }
-    
-    @keyframes pulse {
-        0%, 100% { transform: scale(1); }
-        50% { transform: scale(1.05); }
-    }
-    
-    .excellent { 
-        background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
-    }
-    .strong { 
-        background: linear-gradient(135deg, #20c997 0%, #17a2b8 100%);
-    }
-    .good { 
-        background: linear-gradient(135deg, #17a2b8 0%, #20c997 100%);
-    }
-    .fair { 
-        background: linear-gradient(135deg, #ffc107 0%, #fd7e14 100%);
-        color: #212529;
-    }
-    
-    /* Enhanced alert boxes */
-    .conflict-warning {
-        background: linear-gradient(135deg, #f8d7da 0%, #f5c6cb 100%);
-        color: #721c24;
-        padding: 1rem 1.5rem;
-        border-radius: 12px;
-        border-left: 4px solid #dc3545;
-        margin: 1rem 0;
-        box-shadow: 0 4px 12px rgba(220, 53, 69, 0.15);
-        animation: shake 0.5s ease;
-    }
-    
-    @keyframes shake {
-        0%, 100% { transform: translateX(0); }
-        25% { transform: translateX(-10px); }
-        75% { transform: translateX(10px); }
-    }
-    
-    .cost-estimate {
-        background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%);
-        color: #155724;
-        padding: 1rem 1.5rem;
-        border-radius: 12px;
-        border-left: 4px solid #28a745;
-        margin: 1rem 0;
-        box-shadow: 0 4px 12px rgba(40, 167, 69, 0.15);
-    }
-    
-    .token-warning {
-        background: linear-gradient(135deg, #fff3cd 0%, #ffeeba 100%);
-        color: #856404;
-        padding: 1rem 1.5rem;
-        border-radius: 12px;
-        border-left: 4px solid #ffc107;
-        margin: 1rem 0;
-        box-shadow: 0 4px 12px rgba(255, 193, 7, 0.15);
-        animation: bounce 1s ease;
-    }
-    
-    @keyframes bounce {
-        0%, 100% { transform: translateY(0); }
-        50% { transform: translateY(-10px); }
-    }
-    
-    /* Wizard steps */
-    .wizard-step {
-        display: flex;
-        align-items: center;
-        padding: 0.8rem 1rem;
-        margin: 0.5rem 0;
-        border-radius: 10px;
-        background: #f8f9fa;
-        transition: all 0.3s ease;
-        border: 2px solid transparent;
-    }
-    
-    .wizard-step.active {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        border-color: #5a6fd8;
-        box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
-    }
-    
-    .wizard-step.completed {
-        background: #d4edda;
-        border-color: #28a745;
-    }
-    
-    .wizard-step-number {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        width: 32px;
-        height: 32px;
-        border-radius: 50%;
-        background: #667eea;
-        color: white;
-        font-weight: 600;
-        margin-right: 0.8rem;
-        font-size: 0.9rem;
-    }
-    
-    .wizard-step.completed .wizard-step-number {
-        background: #28a745;
-    }
-    
-    .wizard-step.active .wizard-step-number {
-        background: white;
-        color: #667eea;
-    }
-    
-    /* Info card */
-    .info-card {
-        background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
-        padding: 1rem 1.5rem;
-        border-radius: 12px;
-        border-left: 4px solid #2196f3;
-        margin: 1rem 0;
-        box-shadow: 0 2px 8px rgba(33, 150, 243, 0.15);
-    }
-    
-    /* Success card */
-    .success-card {
-        background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%);
-        padding: 1rem 1.5rem;
-        border-radius: 12px;
-        border-left: 4px solid #28a745;
-        margin: 1rem 0;
-        box-shadow: 0 2px 8px rgba(40, 167, 69, 0.15);
-        animation: fadeInUp 0.5s ease;
-    }
-    
-    @keyframes fadeInUp {
-        from {
-            opacity: 0;
-            transform: translateY(20px);
-        }
-        to {
-            opacity: 1;
-            transform: translateY(0);
-        }
-    }
-    
-    /* Loading skeleton */
-    .skeleton {
-        background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
-        background-size: 200% 100%;
-        animation: loading 1.5s infinite;
-        border-radius: 8px;
-    }
-    
-    @keyframes loading {
-        0% { background-position: 200% 0; }
-        100% { background-position: -200% 0; }
-    }
-    
-    /* Tooltip */
-    .tooltip-icon {
-        display: inline-block;
-        width: 18px;
-        height: 18px;
-        background: #667eea;
-        color: white;
-        border-radius: 50%;
-        text-align: center;
-        line-height: 18px;
-        font-size: 12px;
-        font-weight: bold;
-        cursor: help;
-        margin-left: 0.3rem;
-    }
-    
-    /* Better button styles */
-    .stButton > button {
-        border-radius: 10px;
-        font-weight: 600;
-        transition: all 0.3s ease;
-        border: none;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-    }
-    
-    .stButton > button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 16px rgba(0,0,0,0.2);
-    }
-    
-    /* Search box */
-    .search-box {
-        padding: 0.8rem 1rem;
-        border-radius: 10px;
-        border: 2px solid #e9ecef;
-        font-size: 1rem;
-        width: 100%;
-        transition: all 0.3s ease;
-    }
-    
-    .search-box:focus {
-        outline: none;
-        border-color: #667eea;
-        box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
-    }
-    
-    /* Copy button */
-    .copy-button {
-        display: inline-block;
-        padding: 0.4rem 0.8rem;
-        background: #667eea;
-        color: white;
-        border-radius: 6px;
-        cursor: pointer;
-        font-size: 0.85rem;
-        transition: all 0.2s ease;
-        border: none;
-        font-weight: 500;
-    }
-    
-    .copy-button:hover {
-        background: #5a6fd8;
-        transform: scale(1.05);
-    }
-    
-    /* Preset badge */
-    .preset-badge {
-        display: inline-block;
-        padding: 0.3rem 0.6rem;
-        background: #ffc107;
-        color: #212529;
-        border-radius: 6px;
-        font-size: 0.75rem;
-        font-weight: 600;
-        margin-left: 0.5rem;
-    }
-    
-    /* Accessibility - High contrast mode support */
-    @media (prefers-contrast: high) {
-        .mentee-card, .match-card {
-            border-width: 3px;
-        }
-    }
-    
-    /* Accessibility - Reduced motion */
-    @media (prefers-reduced-motion: reduce) {
-        *, *::before, *::after {
-            animation-duration: 0.01ms !important;
-            animation-iteration-count: 1 !important;
-            transition-duration: 0.01ms !important;
-        }
-    }
-    
-    /* Better focus indicators for accessibility */
-    button:focus, input:focus, textarea:focus {
-        outline: 3px solid #667eea;
-        outline-offset: 2px;
-    }
-    
-    /* Stats card */
-    .stat-card {
-        background: white;
-        padding: 1.5rem;
-        border-radius: 12px;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-        border-left: 4px solid #667eea;
-        transition: all 0.3s ease;
-    }
-    
-    .stat-card:hover {
-        transform: translateY(-4px);
-        box-shadow: 0 8px 24px rgba(0,0,0,0.12);
-    }
-    
-    /* Help panel */
-    .help-panel {
-        background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-        padding: 1.5rem;
-        border-radius: 12px;
-        border: 2px solid #dee2e6;
-        margin: 1rem 0;
-    }
-    
-    /* Session info */
-    .session-info {
-        background: #f8f9fa;
-        padding: 0.8rem 1rem;
-        border-radius: 8px;
-        font-size: 0.85rem;
-        color: #6c757d;
-        margin: 0.5rem 0;
-    }
-</style>
-""", unsafe_allow_html=True)
+st.markdown(CSS_STYLES, unsafe_allow_html=True)
 
-# Helper functions for UI improvements (Improvements: 15, 16, 20, 23, 24)
-def get_prompt_presets():
-    """Get configuration presets for matching (Improvement 16)"""
-    presets = {
-        "Quick Start ⚡": {
-            "description": "Fast matching with standard criteria",
-            "model": "gpt-4o-mini",
-            "batch_size": 20,
-            "prompt_type": "standard"
-        },
-        "Balanced ⭐": {
-            "description": "Best balance of quality and speed (Recommended)",
-            "model": "gpt-4o-mini",
-            "batch_size": 15,
-            "prompt_type": "standard"
-        },
-        "Thorough 🎯": {
-            "description": "Deep analysis with comprehensive matching",
-            "model": "o1-mini",
-            "batch_size": 10,
-            "prompt_type": "detailed"
-        },
-        "Maximum Quality 💎": {
-            "description": "Best possible matches (slower, more expensive)",
-            "model": "o1-preview",
-            "batch_size": 10,
-            "prompt_type": "detailed"
-        }
-    }
-    return presets
 
-def show_help_documentation():
-    """Display help documentation (Improvement 23)"""
-    st.markdown("""
-    <div class="help-panel">
-        <h3>📚 Quick Help Guide</h3>
-        <p><strong>Getting Started:</strong></p>
-        <ol>
-            <li>Upload your mentee and mentor Excel files</li>
-            <li>Enter your OpenAI API key</li>
-            <li>Select a configuration preset or customize settings</li>
-            <li>Click "Generate Matches" and wait for results</li>
-        </ol>
-        
-        <p><strong>File Format Requirements:</strong></p>
-        <ul>
-            <li>Mentee file must have a "Code Mentee" column</li>
-            <li>Mentor file must have a "Code mentor" column</li>
-            <li>Additional columns improve matching quality</li>
-        </ul>
-        
-        <p><strong>Tips for Best Results:</strong></p>
-        <ul>
-            <li>Include detailed information in your data files</li>
-            <li>Use the "Balanced" preset for most cases</li>
-            <li>Check the cost estimate before running</li>
-            <li>Review the heatmap to understand all possible matches</li>
-        </ul>
-        
-        <p><strong>Troubleshooting:</strong></p>
-        <ul>
-            <li><em>Token limit warnings:</em> Try reducing batch size or use fewer mentors/mentees</li>
-            <li><em>Timeout errors:</em> Switch from Assistants API to Direct API or reduce data size</li>
-            <li><em>Missing matches:</em> The system will automatically retry failed batches</li>
-        </ul>
-    </div>
-    """, unsafe_allow_html=True)
-
-def show_session_info():
-    """Display session information (Improvement 24)"""
-    import datetime
-    if 'session_start' not in st.session_state:
-        st.session_state.session_start = datetime.datetime.now()
-    
-    if 'last_match_time' in st.session_state:
-        time_info = f"Last match: {st.session_state.last_match_time.strftime('%I:%M %p')}"
-    else:
-        time_info = f"Session started: {st.session_state.session_start.strftime('%I:%M %p')}"
-    
-    st.markdown(f"""
-    <div class="session-info">
-        ⏰ {time_info}
-    </div>
-    """, unsafe_allow_html=True)
-
-def copy_to_clipboard_js(text, button_id):
-    """Generate JavaScript for copy to clipboard (Improvement 20)"""
-    return f"""
-    <button class="copy-button" onclick="
-        navigator.clipboard.writeText(`{text}`).then(() => {{
-            this.innerHTML = '✓ Copied!';
-            setTimeout(() => {{ this.innerHTML = '📋 Copy'; }}, 2000);
-        }});
-    " id="{button_id}">📋 Copy</button>
+def is_field_compatible(field1, field2):
     """
-
-def show_wizard_steps(step1_done, step2_done, step3_done, current_step):
-    """Display wizard-style progress steps (Improvement 7)"""
-    steps = [
-        {"num": 1, "title": "Upload Data", "done": step1_done},
-        {"num": 2, "title": "Configure Settings", "done": step2_done},
-        {"num": 3, "title": "Generate Matches", "done": step3_done}
+    Check if two fields are same or related
+    Used for validation to detect mismatched high scores
+    """
+    # Normalize fields
+    f1 = str(field1).lower().strip()
+    f2 = str(field2).lower().strip()
+    
+    # Exact match
+    if f1 == f2:
+        return True
+    
+    # Define related field groups based on common academic/professional fields
+    related_groups = [
+        {'biology', 'molecular biology', 'biochemistry', 'biophysics', 'cell biology', 'structural biology'},
+        {'computer science', 'software engineering', 'data science', 'information technology', 'artificial intelligence'},
+        {'physics', 'applied physics', 'quantum physics', 'astrophysics'},
+        {'chemistry', 'organic chemistry', 'analytical chemistry', 'physical chemistry', 'inorganic chemistry'},
+        {'medicine', 'clinical medicine', 'medical sciences', 'biomedical sciences'},
+        {'engineering', 'mechanical engineering', 'electrical engineering', 'civil engineering'},
+        {'biotechnology', 'bioengineering', 'biomedical engineering'},
+        {'mathematics', 'applied mathematics', 'statistics', 'computational mathematics'},
+        {'neuroscience', 'cognitive science', 'behavioral neuroscience'},
+        {'genetics', 'genomics', 'molecular genetics'},
+        {'immunology', 'microbiology', 'virology'},
+        {'pharmacology', 'pharmacy', 'pharmaceutical sciences'},
+        # Add more groups as needed based on your domain
     ]
     
-    st.markdown("### 🧭 Progress")
+    for group in related_groups:
+        if f1 in group and f2 in group:
+            return True
     
-    for step in steps:
-        step_class = ""
-        if step["done"]:
-            step_class = "completed"
-            icon = "✓"
-        elif step["num"] == current_step:
-            step_class = "active"
-            icon = step["num"]
-        else:
-            icon = step["num"]
+    return False
+
+def validate_and_flag_matches(matches, mentees_df, mentors_df):
+    """
+    Validate match scores and flag suspicious high scores
+    This helps identify when AI is inflating scores incorrectly
+    """
+    st.info("🔍 Validating match quality...")
+    
+    flagged = []
+    stats = {
+        'total': 0,
+        'excellent': 0,  # >=85
+        'strong': 0,     # 75-84
+        'good': 0,       # 60-74
+        'fair': 0,       # 45-59
+        'poor': 0        # <45
+    }
+    
+    for match_data in matches:
+        mentee_id = match_data['mentee_id']
+        for match in match_data['matches']:
+            mentor_id = match['mentor_id']
+            score = match['match_percentage']
+            
+            stats['total'] += 1
+            
+            # Update statistics
+            if score >= 85:
+                stats['excellent'] += 1
+            elif score >= 75:
+                stats['strong'] += 1
+            elif score >= 60:
+                stats['good'] += 1
+            elif score >= 45:
+                stats['fair'] += 1
+            else:
+                stats['poor'] += 1
+            
+            # Get mentee and mentor data
+            # Convert IDs to int for comparison (matches contain string IDs from JSON, DataFrame has int IDs)
+            try:
+                mentee_id_int = int(mentee_id)
+                mentor_id_int = int(mentor_id)
+                mentee = mentees_df[mentees_df[MENTEE_COLUMNS['id']] == mentee_id_int].iloc[0]
+                mentor = mentors_df[mentors_df[MENTOR_COLUMNS['id']] == mentor_id_int].iloc[0]
+            except (ValueError, IndexError) as e:
+                st.warning(f"⚠️ Could not extract details for {mentee_id} → {mentor_id}: {e}")
+                continue
+            
+            issues = []
+            
+            # Validation 1: High score with different fields
+            if score >= 75:
+                mentee_field = str(mentee[MENTEE_COLUMNS['field']]).lower().strip()
+                mentor_field = str(mentor[MENTOR_COLUMNS['field']]).lower().strip()
+                
+                if mentee_field != mentor_field:
+                    # Check if they're at least related
+                    if not is_field_compatible(mentee_field, mentor_field):
+                        issues.append(f"Score {score}% but fields don't match: '{mentee_field}' vs '{mentor_field}'")
+            
+            # Validation 2: High score with no keyword overlap
+            if score >= 70:
+                mentee_spec = str(mentee.get(MENTEE_COLUMNS['specialization'], '')).lower()
+                mentor_spec = str(mentor.get(MENTOR_COLUMNS['specialization'], '')).lower()
+                
+                # Simple keyword overlap check (ignore common short words)
+                mentee_words = set(word for word in mentee_spec.split() if len(word) > 3)
+                mentor_words = set(word for word in mentor_spec.split() if len(word) > 3)
+                overlap = len(mentee_words & mentor_words)
+                
+                if overlap == 0 and mentee_spec and mentor_spec:
+                    issues.append(f"Score {score}% but 0 keyword overlap in specializations")
+            
+            # Validation 3: Excellent score requires strong evidence
+            if score >= 85:
+                # Must have field match
+                mentee_field = str(mentee[MENTEE_COLUMNS['field']]).lower().strip()
+                mentor_field = str(mentor[MENTOR_COLUMNS['field']]).lower().strip()
+                
+                if mentee_field != mentor_field and not is_field_compatible(mentee_field, mentor_field):
+                    issues.append(f"Excellent score ({score}%) requires field match")
+                
+                # Check experience if available
+                if MENTOR_COLUMNS['experience_years'] in mentor:
+                    try:
+                        mentor_exp = int(mentor[MENTOR_COLUMNS['experience_years']])
+                        if mentor_exp < 5:
+                            issues.append(f"Excellent score ({score}%) but mentor has only {mentor_exp} years experience")
+                    except (ValueError, TypeError):
+                        pass
+            
+            if issues:
+                flagged.append({
+                    'mentee_id': mentee_id,
+                    'mentor_id': mentor_id,
+                    'score': score,
+                    'issues': issues
+                })
+    
+    # Display statistics
+    st.markdown("### 📊 Score Distribution")
+    col1, col2, col3, col4, col5 = st.columns(5)
+    with col1:
+        st.metric("Excellent (≥85%)", stats['excellent'])
+    with col2:
+        st.metric("Strong (75-84%)", stats['strong'])
+    with col3:
+        st.metric("Good (60-74%)", stats['good'])
+    with col4:
+        st.metric("Fair (45-59%)", stats['fair'])
+    with col5:
+        st.metric("Poor (<45%)", stats['poor'])
+    
+    # Show average score
+    if matches:
+        all_scores = [match['match_percentage'] for match_data in matches for match in match_data['matches']]
+        avg_score = sum(all_scores) / len(all_scores) if all_scores else 0
+        st.info(f"📈 Average Score: {avg_score:.1f}%")
+    
+    # Show flagged matches
+    if flagged:
+        st.warning(f"⚠️ {len(flagged)} matches flagged for review")
         
-        st.markdown(f"""
-        <div class="wizard-step {step_class}" role="status" aria-label="Step {step['num']}: {step['title']}">
-            <div class="wizard-step-number">{icon}</div>
-            <div><strong>{step['title']}</strong></div>
-        </div>
-        """, unsafe_allow_html=True)
-
-def validate_uploaded_file(df, file_type):
-    """Validate uploaded files and show warnings (Improvement 18)"""
-    warnings = []
-    errors = []
-    
-    # Check for required columns
-    if file_type == 'mentee':
-        if 'Code Mentee' not in df.columns:
-            errors.append("Missing required column: 'Code Mentee'")
-    elif file_type == 'mentor':
-        if 'Code mentor' not in df.columns:
-            errors.append("Missing required column: 'Code mentor'")
-    
-    # Check for empty values
-    if file_type == 'mentee' and 'Code Mentee' in df.columns:
-        empty_count = df['Code Mentee'].isna().sum()
-        if empty_count > 0:
-            warnings.append(f"{empty_count} rows have empty 'Code Mentee' values")
-    
-    if file_type == 'mentor' and 'Code mentor' in df.columns:
-        empty_count = df['Code mentor'].isna().sum()
-        if empty_count > 0:
-            warnings.append(f"{empty_count} rows have empty 'Code mentor' values")
-    
-    # CRITICAL: Check for duplicate IDs
-    if file_type == 'mentee' and 'Code Mentee' in df.columns:
-        id_col = df['Code Mentee'].dropna()  # Remove NaN values
-        duplicates = id_col[id_col.duplicated(keep=False)]
-        if len(duplicates) > 0:
-            unique_dups = duplicates.unique()
-            errors.append(f"DUPLICATE IDs FOUND: {len(unique_dups)} mentee ID(s) appear multiple times!")
-            errors.append(f"Duplicate mentee IDs: {', '.join(map(str, unique_dups[:10]))}" + (" ..." if len(unique_dups) > 10 else ""))
-    
-    if file_type == 'mentor' and 'Code mentor' in df.columns:
-        id_col = df['Code mentor'].dropna()  # Remove NaN values
-        duplicates = id_col[id_col.duplicated(keep=False)]
-        if len(duplicates) > 0:
-            unique_dups = duplicates.unique()
-            errors.append(f"DUPLICATE IDs FOUND: {len(unique_dups)} mentor ID(s) appear multiple times!")
-            errors.append(f"Duplicate mentor IDs: {', '.join(map(str, unique_dups[:10]))}" + (" ..." if len(unique_dups) > 10 else ""))
-    
-    # Check data quality
-    total_cells = df.shape[0] * df.shape[1]
-    empty_cells = df.isna().sum().sum()
-    completeness = ((total_cells - empty_cells) / total_cells) * 100
-    
-    if completeness < 50:
-        warnings.append(f"Low data completeness: {completeness:.1f}%")
-    
-    return errors, warnings, completeness
-
-def estimate_tokens(text: str, model: str = "gpt-4") -> int:
-    """Estimate the number of tokens in a text string"""
-    try:
-        encoding = tiktoken.encoding_for_model(model)
-    except:
-        encoding = tiktoken.get_encoding("cl100k_base")  # Default encoding
-    
-    return len(encoding.encode(text))
-
-def estimate_api_cost(prompt_tokens: int, completion_tokens: int, model: str = "gpt-4o-mini") -> float:
-    """Estimate the cost of an API call based on token usage"""
-    # Pricing as of 2024 (per 1M tokens)
-    pricing = {
-        "gpt-4o-mini": {"prompt": 0.15, "completion": 0.60},  # per 1M tokens
-        "gpt-4o": {"prompt": 2.50, "completion": 10.00},
-        "gpt-4": {"prompt": 30.00, "completion": 60.00},
-        "gpt-3.5-turbo": {"prompt": 0.50, "completion": 1.50}
-    }
-    
-    if model not in pricing:
-        model = "gpt-4o-mini"
-    
-    prompt_cost = (prompt_tokens / 1_000_000) * pricing[model]["prompt"]
-    completion_cost = (completion_tokens / 1_000_000) * pricing[model]["completion"]
-    
-    return prompt_cost + completion_cost
-
-def clean_dataframe(df):
-    """Clean and validate dataframe"""
-    # Remove empty rows and columns
-    df = df.dropna(how='all').dropna(axis=1, how='all')
-    
-    # Check if we have "Unnamed" columns (indicates empty header rows)
-    unnamed_cols = [col for col in df.columns if 'Unnamed' in str(col)]
-    if unnamed_cols:
-        # Find the first row that has actual data
-        for idx in range(len(df)):
-            row = df.iloc[idx]
-            non_empty_values = [val for val in row if pd.notna(val) and str(val).strip() != '']
-            if len(non_empty_values) >= 3:
-                df.columns = df.iloc[idx].values
-                df = df.iloc[idx+1:].reset_index(drop=True)
-                break
-    
-    # Clean column names
-    df.columns = df.columns.str.strip()
-    df.columns = df.columns.str.replace(r'[^\w\s]', '', regex=True)
-    df.columns = df.columns.str.replace(r'\s+', ' ', regex=True)
-    
-    # Clean string columns
-    for col in df.select_dtypes(include=['object']).columns:
-        df[col] = df[col].astype(str).str.strip()
-        df[col] = df[col].replace('nan', '')
-        df[col] = df[col].replace('', np.nan)
-    
-    return df
-
-def validate_file_structure(df, file_type):
-    """Validate that uploaded files have minimum required columns"""
-    # Only check for the essential ID column - all other columns are optional
-    # This allows flexibility while ensuring we can identify mentees/mentors
-    
-    if file_type == 'mentee':
-        # Just need to identify mentees
-        required_cols = ['Code Mentee']
-        missing_cols = [col for col in required_cols if col not in df.columns]
-        if not missing_cols:
-            # Show info about what columns we found
-            return []
-        return missing_cols
-    elif file_type == 'mentor':
-        # Just need to identify mentors
-        required_cols = ['Code mentor']
-        missing_cols = [col for col in required_cols if col not in df.columns]
-        if not missing_cols:
-            return []
-        return missing_cols
+        with st.expander(f"🚩 View Flagged Matches ({len(flagged)})"):
+            for fm in flagged:
+                st.error(f"**{fm['mentee_id']} → {fm['mentor_id']}** ({fm['score']}%)")
+                for issue in fm['issues']:
+                    st.write(f"  • {issue}")
+                st.divider()
     else:
-        return []
+        st.success("✅ All matches passed validation checks!")
+    
+    return flagged, stats
 
-def generate_sample_data():
-    """Generate sample data for testing"""
-    mentees_data = {
-        'Code Mentee': ['Mentee_A1', 'Mentee_B2', 'Mentee_C3', 'Mentee_D4'],
-        'Mentee Affiliation': ['University Alpha', 'Institute Beta', 'College Gamma', 'University Delta'],
-        'Mentee Country of your affiliated institution': ['Spain', 'France', 'Italy', 'Germany'],
-        'Mentee Highest educational level completed': ['Master', 'Bachelor', 'Master', 'Bachelor'],
-        'Mentee Current education program': ['PhD', 'Master', 'PhD', 'PhD'],
-        'Mentee Field of expertise': ['Biomedicine', 'Computer Science', 'Biomedicine', 'Data Science'],
-        'Mentee Specialization': ['Cancer Research', 'Machine Learning', 'Genetics', 'AI Ethics'],
-        'Mentee Specific hard skills that you have': [
-            'Cell culture, PCR, Western blot',
-            'Python, TensorFlow, Deep Learning',
-            'GWAS, R programming, Statistics',
-            'Python, Ethics frameworks, Policy analysis'
-        ],
-        'Mentee Areas where guidance is needed': [
-            'Research methodology, grant writing',
-            'Industry transition, networking',
-            'International collaboration, publication',
-            'Career planning, academic vs industry'
-        ],
-        'Mentee Career goals for the next 2 years': [
-            'Postdoc in top research institute',
-            'Senior data scientist role',
-            'International research collaboration',
-            'PhD completion and industry transition'
-        ]
+def analyze_score_distribution(matrix_df):
+    """
+    Analyze the distribution of scores to detect if AI is being too generous
+    Returns distribution statistics for monitoring score quality
+    """
+    import numpy as np
+    
+    all_scores = matrix_df.values.flatten()
+    all_scores = all_scores[~np.isnan(all_scores)]  # Remove NaN values
+    
+    if len(all_scores) == 0:
+        st.error("❌ No valid scores to analyze")
+        return None
+    
+    distribution = {
+        'excellent_90_100': int(np.sum((all_scores >= 90) & (all_scores <= 100))),
+        'strong_75_89': int(np.sum((all_scores >= 75) & (all_scores < 90))),
+        'good_60_74': int(np.sum((all_scores >= 60) & (all_scores < 75))),
+        'fair_45_59': int(np.sum((all_scores >= 45) & (all_scores < 60))),
+        'poor_30_44': int(np.sum((all_scores >= 30) & (all_scores < 45))),
+        'very_poor_0_29': int(np.sum(all_scores < 30)),
+        'total': len(all_scores),
+        'average': float(np.mean(all_scores)),
+        'median': float(np.median(all_scores))
     }
     
-    mentors_data = {
-        'Code mentor': ['Mentor_X1', 'Mentor_Y2', 'Mentor_Z3', 'Mentor_W4', 'Mentor_V5'],
-        'Mentor Affiliation': ['Harvard Medical', 'Google AI', 'Max Planck Institute', 'MIT', 'Stanford'],
-        'Mentor Country of affiliated institution': ['USA', 'USA', 'Germany', 'USA', 'USA'],
-        'Mentor Type of Institution': ['Academia', 'Industry', 'Academia', 'Academia', 'Academia'],
-        'Field of expertise': ['Biomedicine', 'Computer Science', 'Biomedicine', 'Data Science', 'Biomedicine'],
-        'Mentor Specialization': [
-            'Oncology research, immunotherapy',
-            'Machine Learning, Computer Vision',
-            'Genomics, population genetics',
-            'AI Ethics, responsible AI',
-            'Molecular biology, drug discovery'
-        ],
-        'Mentor Specific Hard Skills and Professional Competencies has Mastered': [
-            'Clinical trials, biomarker discovery, immunology',
-            'TensorFlow, PyTorch, MLOps, team leadership',
-            'Population genomics, GWAS, statistical genetics',
-            'AI governance, policy development, stakeholder engagement',
-            'High-throughput screening, medicinal chemistry'
-        ],
-        'Mentor Years of Professional Experience in his her Field': [15, 8, 12, 6, 20]
-    }
+    st.markdown("### 📊 Score Distribution Analysis")
     
-    return pd.DataFrame(mentees_data), pd.DataFrame(mentors_data)
-
-def create_matrix_prompt(use_file_search=False, specialty=None):
-    """Create the prompt for generating compatibility matrix"""
+    # Display metrics in columns
+    col1, col2, col3, col4, col5, col6 = st.columns(6)
     
-    # Get specialty from session state if not provided
-    if specialty is None:
-        specialty = st.session_state.get('imfahe_specialty', 
-            "IMP-Biomedicine (Biology, Medicine, Pharmacy, Biotechnology or related areas)")
+    with col1:
+        pct = (distribution['excellent_90_100'] / distribution['total']) * 100
+        st.metric("Excellent\n90-100%", distribution['excellent_90_100'], f"{pct:.1f}%")
+    with col2:
+        pct = (distribution['strong_75_89'] / distribution['total']) * 100
+        st.metric("Strong\n75-89%", distribution['strong_75_89'], f"{pct:.1f}%")
+    with col3:
+        pct = (distribution['good_60_74'] / distribution['total']) * 100
+        st.metric("Good\n60-74%", distribution['good_60_74'], f"{pct:.1f}%")
+    with col4:
+        pct = (distribution['fair_45_59'] / distribution['total']) * 100
+        st.metric("Fair\n45-59%", distribution['fair_45_59'], f"{pct:.1f}%")
+    with col5:
+        pct = (distribution['poor_30_44'] / distribution['total']) * 100
+        st.metric("Poor\n30-44%", distribution['poor_30_44'], f"{pct:.1f}%")
+    with col6:
+        pct = (distribution['very_poor_0_29'] / distribution['total']) * 100
+        st.metric("Very Poor\n0-29%", distribution['very_poor_0_29'], f"{pct:.1f}%")
     
-    # Extract specialty name and fields
-    specialty_name = specialty.split("(")[0].strip()
-    specialty_fields = specialty.split("(")[1].rstrip(")") if "(" in specialty else "various fields"
+    # Show average and median
+    col_avg, col_med = st.columns(2)
+    with col_avg:
+        st.info(f"📈 **Average Score**: {distribution['average']:.1f}%")
+    with col_med:
+        st.info(f"📊 **Median Score**: {distribution['median']:.1f}%")
     
-    # Create specialty-specific context
-    specialty_context = f"""
-PROGRAM CONTEXT: {specialty_name}
-- You are a coordinator for IMFAHE's International Mentor Program
-- IMFAHE Mission: Global career acceleration through international mentorship
-- Program Focus: {specialty_fields}
-- Goal: Help mentees develop international careers through practical skill transfer and guidance
-- Priority: Mentees need mentors with SPECIFIC, relevant expertise in their specialization
-
-SPECIALIZATION MATCHING RULES:
-- Level 1 (Broad Field): Ensure both are in the program's domain ({specialty_fields})
-- Level 2 (Specialization): Critical - mentor and mentee should have COMPATIBLE specific specializations
-- A mismatch at Level 2 should result in LOW field alignment scores (20-40%), even if Level 1 matches
-- Example: In biomedicine, DO NOT highly match virology ↔ biotechnology unless there's direct overlap
-
-"""
+    # Expected distribution guidance
+    st.caption("💡 **Expected Distribution**: Most scores should be in 30-60% range (poor/fair matches), with only 5-15% scoring 75%+")
     
-    file_search_note = """
-TRAINING DATA:
-- Historical matching data is available via the file_search tool
-- Use file_search to learn patterns from successful past matches
-- Apply insights from historical data to inform your evaluation
-- Look for patterns in field alignment, skill matches, and career goal compatibility
-
-""" if use_file_search else ""
+    # Warning checks
+    high_score_pct = (distribution['strong_75_89'] + distribution['excellent_90_100']) / distribution['total']
+    low_score_pct = (distribution['very_poor_0_29'] + distribution['poor_30_44']) / distribution['total']
     
-    prompt = f"""You are an expert mentorship coordinator for IMFAHE's International Mentor Program.
-
-{specialty_context}{file_search_note}CRITICAL REQUIREMENTS:
-- You MUST evaluate EVERY SINGLE mentor with EVERY SINGLE mentee
-- The matrix must be COMPLETE - missing mentors or mentees will break the system
-- Count the mentors and mentees in the data and ensure your output has ALL of them
-
-TASK: Generate a complete compatibility matrix
-- Evaluate EVERY mentee with EVERY mentor (no exceptions!)
-- Return a percentage score (0-100) for each combination
-- Base scores on ALL provided data fields
-
-EVALUATION CRITERIA:
-- Broad field compatibility (10%) - Both in the program's domain
-- Specific specialization alignment (25%) - Compatible sub-fields (see SPECIALIZATION MATCHING RULES)
-- Technical skills match (20%) - Mentor can teach/guide on mentee's needed skills
-- Career trajectory alignment (15%) - Mentor's career path aligns with mentee's goals
-- International experience value (10%) - Mentor has relevant international experience
-- Language compatibility (10%) - Effective communication capability
-- Practical mentoring capacity (5%) - Mentor can provide hands-on guidance
-- Industry/academic context match (5%) - Aligns with mentee's career direction
-
-SCORING GUIDELINES FOR IMFAHE INTERNATIONAL MENTOR PROGRAM:
-- 90-100%: Exceptional match
-  * Specific specialization alignment (same or highly complementary sub-fields)
-  * Mentor can directly guide mentee's research/career path
-  * Strong international experience overlap
-  * Excellent language/communication compatibility
-  
-- 75-89%: Strong match
-  * Related specializations within the program domain
-  * Mentor has relevant skills and experience
-  * Good career trajectory alignment
-  * Solid international/language fit
-  
-- 60-74%: Good match
-  * Same broad field with some specialization overlap
-  * Mentor can provide general career guidance
-  * Acceptable skill/experience match
-  
-- 45-59%: Fair match
-  * Same broad field but limited specialization overlap
-  * Mentor can provide limited specific guidance
-  * USE SPARINGLY - prefer higher matches
-  
-- 0-44%: Poor match
-  * Incompatible specializations (e.g., virology ↔ biotechnology without relevant overlap)
-  * Mentor cannot provide meaningful guidance in mentee's area
-  * AVOID these matches - they don't serve IMFAHE's mission
-
-OUTPUT FORMAT:
-Return ONLY a JSON object (no markdown, no extra text):
-  {{
-  "matrix": [
-      {{
-        "mentor_id": "EXACT_CODE_FROM_FILE", 
-      "scores": [
-        {{"mentee_id": "EXACT_CODE_FROM_FILE", "percentage": 85}},
-        {{"mentee_id": "EXACT_CODE_FROM_FILE", "percentage": 72}},
-        ... (ALL mentees - check the data for complete list!)
-      ]
-    }},
-    ... (ALL mentors - check the data for complete list!)
-  ]
-}}
-
-VERIFICATION BEFORE RESPONDING:
-1. Count how many mentors are in the provided data
-2. Count how many mentees are in the provided data
-3. Ensure your response has exactly that many mentor entries
-4. Ensure each mentor entry has exactly that many mentee scores
-5. For each match scored >70%, verify:
-   - Are their specializations actually compatible? (not just same broad field)
-   - Can the mentor realistically guide the mentee's specific research/career area?
-   - If uncertain, READ their research interests/thesis topics again and score conservatively
-
-IMPORTANT: 
-- Use EXACT codes from the provided data (Code mentor, Code Mentee columns)
-- Include every single mentee-mentor combination
-- DO NOT skip any mentors or mentees
-- DO NOT include reasoning (that comes later)
-- Just percentages for now
-- Remember: This is IMFAHE - focus on international career acceleration, not just academic alignment"""
-    return prompt
-
-def create_reasoning_prompt(assignments, specialty=None):
-    """Create prompt to get reasoning for specific assignments"""
+    warnings = []
     
-    # Get specialty from session state if not provided
-    if specialty is None:
-        specialty = st.session_state.get('imfahe_specialty', 
-            "IMP-Biomedicine (Biology, Medicine, Pharmacy, Biotechnology or related areas)")
+    if high_score_pct > 0.30:
+        warnings.append(f"⚠️ **Too many high scores**: {high_score_pct*100:.1f}% of matches are 'Strong' or 'Excellent' (expected <30%). AI may be too generous.")
     
-    specialty_name = specialty.split("(")[0].strip()
+    if low_score_pct < 0.40:
+        warnings.append(f"⚠️ **Too few poor matches**: Only {low_score_pct*100:.1f}% scored below 45% (expected >40%). Most mentor-mentee pairs should be poor matches.")
     
-    assignment_list = "\n".join([f"- {mentee} → {mentor} (score: {score}%)" 
-                                  for mentee, mentor, score in assignments])
+    if distribution['average'] > 65:
+        warnings.append(f"⚠️ **Average too high**: {distribution['average']:.1f}% (expected 50-65%). Scoring may be inflated.")
     
-    prompt = f"""You are explaining matches for IMFAHE's International Mentor Program ({specialty_name}).
+    if distribution['average'] < 40:
+        warnings.append(f"✅ **Good average**: {distribution['average']:.1f}% indicates realistic scoring with many poor matches.")
+    
+    # Display warnings
+    if warnings:
+        with st.expander("⚠️ Distribution Analysis"):
+            for warning in warnings:
+                if "✅" in warning:
+                    st.success(warning)
+                else:
+                    st.warning(warning)
+    else:
+        st.success("✅ Score distribution looks reasonable!")
+    
+    return distribution
 
-CONTEXT:
-- IMFAHE Mission: Global career acceleration through international mentorship
-- Focus: Helping mentees develop international careers through practical guidance
-- These assignments were optimally selected considering all mentees and mentors
-
-ASSIGNMENTS TO EXPLAIN:
-{assignment_list}
-
-For each assignment, provide reasoning in 2-3 sentences, emphasizing:
-- SPECIFIC specialization alignment (not just broad field match)
-- How the mentor can directly guide the mentee's research/career goals
-- International experience relevance
-- Technical skills the mentor can teach/transfer
-- Language/communication compatibility
-
-OUTPUT FORMAT:
-Return ONLY a JSON array (no markdown, no extra text):
-[
-  {{
-    "mentee_id": "EXACT_CODE",
-    "mentor_id": "EXACT_CODE",
-    "reasoning": "Brief 2-3 sentence explanation focusing on specific specialization alignment and career acceleration value."
-  }},
-  ...
-]"""
-    return prompt
-
-def create_default_prompt():
-    """Legacy prompt - now using matrix approach"""
-    training_file_ids = st.session_state.get('training_file_ids', [])
-    return create_matrix_prompt(use_file_search=len(training_file_ids) > 0)
+# =====================================================================
+# PROMPT FUNCTIONS
+# All prompt generation functions have been moved to prompts.py
+# This keeps app.py cleaner and more maintainable.
+# Functions available: create_matrix_prompt, create_reasoning_prompt,
+#                      get_prompt_for_api, create_default_prompt
+# =====================================================================
 
 def clean_text_for_csv(df):
     """Clean text fields to prevent CSV parsing issues"""
@@ -976,28 +326,37 @@ def clean_text_for_csv(df):
     return df
 
 def prepare_data_for_assistant(mentees_df, mentors_df, training_files):
-    """Prepare data with ALL columns for comprehensive matching"""
+    """Prepare data with ALL columns for comprehensive matching
     
-    # Use ALL columns - no filtering
-    mentees_full = mentees_df.copy()
-    mentors_full = mentors_df.copy()
-    
-    # Clean text fields to prevent CSV parsing issues (removes embedded newlines)
-    mentees_cleaned = clean_text_for_csv(mentees_full)
-    mentors_cleaned = clean_text_for_csv(mentors_full)
+    Args:
+        mentees_df: DataFrame of mentees (None to skip mentees section for stateful subsequent batches)
+        mentors_df: DataFrame of mentors
+        training_files: List of training DataFrames
+    """
     
     # Combine into a single structured document
     combined_data = "# MENTORSHIP MATCHING DATA\n\n"
-    combined_data += "## MENTEES TO MATCH (ALL DATA)\n"
-    combined_data += f"Total mentees: {len(mentees_cleaned)}\n"
-    combined_data += f"All columns included: {', '.join(mentees_cleaned.columns.tolist())}\n\n"
-    combined_data += mentees_cleaned.to_csv(index=False)
-    combined_data += "\n## AVAILABLE MENTORS (ALL DATA)\n"
+    
+    # Add mentees section (only if provided)
+    if mentees_df is not None:
+        mentees_full = mentees_df.copy()
+        mentees_cleaned = clean_text_for_csv(mentees_full)
+        combined_data += "## MENTEES TO MATCH (ALL DATA)\n"
+        combined_data += f"Total mentees: {len(mentees_cleaned)}\n"
+        combined_data += f"All columns included: {', '.join(mentees_cleaned.columns.tolist())}\n\n"
+        combined_data += mentees_cleaned.to_csv(index=False)
+        combined_data += "\n"
+    
+    # Add mentors section (always provided)
+    mentors_full = mentors_df.copy()
+    mentors_cleaned = clean_text_for_csv(mentors_full)
+    combined_data += "## AVAILABLE MENTORS (ALL DATA)\n"
     combined_data += f"Total mentors: {len(mentors_cleaned)}\n"
     combined_data += f"All columns included: {', '.join(mentors_cleaned.columns.tolist())}\n\n"
     combined_data += mentors_cleaned.to_csv(index=False)
     
-    if training_files:
+    # Add training files (only if provided)
+    if training_files and len(training_files) > 0:
         combined_data += "\n## TRAINING EXAMPLES (First 5 rows for reference)\n"
         for i, df in enumerate(training_files):
             df_cleaned = clean_text_for_csv(df.head(5))
@@ -1006,18 +365,398 @@ def prepare_data_for_assistant(mentees_df, mentors_df, training_files):
     
     return combined_data
 
-def call_openai_api_with_assistants(prompt, mentees_df, mentors_df, training_data, api_key, model="gpt-4o-mini", mentor_subset=None):
-    """Use OpenAI Assistants API - sends ALL data directly in message
+def call_openai_api_with_chat_completions(prompt, mentees_df, mentors_df, training_data, api_key, model="gpt-4o-mini", mentor_subset=None, use_stateful=False, previous_response_id=None, is_first_batch=True):
+    """Use OpenAI Responses API - replaces Chat Completions API
+    
+    Migration to Responses API per:
+    https://platform.openai.com/docs/guides/migrate-to-responses
+    
+    Supports both stateless (store=False) and stateful (store=True) modes:
+    - Stateless: Each call is independent with full context (default, backward compatible)
+    - Stateful: Context is maintained across calls, only new data sent in subsequent calls
     
     Args:
         mentor_subset: Optional list of mentor IDs to evaluate (for batching)
+        use_stateful: Enable stateful mode (store=True) for efficient batching
+        previous_response_id: Response ID from previous call (for stateful chaining)
+        is_first_batch: Whether this is the first batch (needs full context)
+    """
+    try:
+        client = OpenAI(api_key=api_key)
+        
+        # Check if Responses API is available
+        if hasattr(client, 'responses'):
+            responses_api = client.responses
+            api_name = "Responses API"
+        elif hasattr(client, 'beta') and hasattr(client.beta, 'responses'):
+            responses_api = client.beta.responses
+            api_name = "Responses API (Beta)"
+        else:
+            # Fallback to Chat Completions if Responses not available
+            st.warning("⚠️ Responses API not available, falling back to Chat Completions")
+            return call_openai_api_chat_completions_legacy(prompt, mentees_df, mentors_df, training_data, api_key, model, mentor_subset)
+        
+        st.info(f"🔄 Using {api_name}...")
+        
+        # If mentor_subset provided, filter mentors_df
+        if mentor_subset:
+            mentors_to_use = mentors_df[mentors_df[MENTOR_COLUMNS['id']].isin(mentor_subset)]
+        else:
+            mentors_to_use = mentors_df
+        
+        # Prepare data based on mode
+        if use_stateful and not is_first_batch and previous_response_id:
+            # Stateful mode, subsequent batch: Only send NEW mentor data
+            st.info("🔗 Stateful mode: Sending only new mentor batch (context preserved from previous call)")
+            combined_data = prepare_data_for_assistant(None, mentors_to_use, [])  # Only mentors, no mentees/training
+            full_message = f"Evaluate these additional mentors against the same mentees from the previous context:\n\n{combined_data}"
+        else:
+            # Stateless mode OR first batch: Send complete context
+            if use_stateful:
+                st.info("🔗 Stateful mode: First batch - sending full context")
+            combined_data = prepare_data_for_assistant(mentees_df, mentors_to_use, training_data)
+            full_message = f"{prompt}\n\n{combined_data}\n\nGenerate matches for ALL mentees in JSON format as specified."
+        
+        # Estimate tokens and cost
+        prompt_tokens = estimate_tokens(full_message, model)
+        estimated_completion_tokens = len(mentees_df) * 500  # Rough estimate
+        estimated_cost = estimate_api_cost(prompt_tokens, estimated_completion_tokens, model)
+        
+        # Display token and cost information
+        mode_str = "stateful (store=True)" if use_stateful else "stateless (store=False)"
+        if use_stateful and not is_first_batch:
+            mode_str += " - subsequent batch"
+        st.markdown(f"""
+        <div class="cost-estimate">
+            <strong>📊 API Usage Estimate:</strong><br>
+            • Input tokens: ~{prompt_tokens:,}<br>
+            • Expected output tokens: ~{estimated_completion_tokens:,}<br>
+            • Estimated cost: ${estimated_cost:.4f}<br>
+            • Model: {model}<br>
+            • Mode: {mode_str}
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Check token limits (updated for newer models)
+        total_tokens = prompt_tokens + estimated_completion_tokens
+        model_limits = {
+            # GPT-4o models
+            "gpt-4o": 128000,
+            "gpt-4o-mini": 128000,
+            # o1 models (reasoning)
+            "o1-preview": 128000,
+            "o1-mini": 128000,
+            "o3-mini": 200000,
+            # GPT-4 Turbo
+            "gpt-4-turbo": 128000,
+            "gpt-4-turbo-preview": 128000,
+            # GPT-4 classic
+            "gpt-4": 8192,
+            # GPT-3.5
+            "gpt-3.5-turbo": 16384,
+            # GPT-5 models
+            "gpt-5": 200000,
+            "gpt-5.1": 200000,
+            "gpt-5.1-mini": 200000,
+            "gpt-5-mini": 200000,
+            "gpt-5-nano": 128000,
+            "gpt-5.1-reasoning": 200000,
+            # ChatGPT models
+            "chatgpt-4o-latest": 128000,
+        }
+        
+        if total_tokens > model_limits.get(model, 128000):
+            st.markdown(f"""
+            <div class="token-warning">
+                <strong>⚠️ Token Limit Warning:</strong><br>
+                Estimated tokens ({total_tokens:,}) may exceed model limit ({model_limits.get(model, 128000):,}).<br>
+                Try reducing batch size or splitting the data.
+            </div>
+            """, unsafe_allow_html=True)
+            return None
+        
+        # Check if training files are uploaded to OpenAI storage
+        training_file_ids = st.session_state.get('training_file_ids', [])
+        
+        # Prepare messages for Responses API
+        # Responses API uses 'input' parameter which can accept messages array
+        messages = [
+            {
+                "role": "system",
+                "content": "You are a mentorship matching expert for IMFAHE's International Mentor Program. You MUST respond with valid JSON only, following the exact format specified."
+            },
+            {
+                "role": "user",
+                "content": full_message
+            }
+        ]
+        
+        st.info("🔄 Sending request to OpenAI Responses API...")
+        
+        # File search is now handled as a tool in Responses API (not as message attachments)
+        if training_file_ids:
+            st.info(f"📚 Including {len(training_file_ids)} training file(s) via file_search tool...")
+        
+        # Call Responses API
+        start_time = time.time()
+        
+        # Check if model supports response_format and temperature (o1/o3 models don't)
+        is_reasoning_model = any(x in model.lower() for x in ['o1-', 'o3-', 'o1', 'o3'])
+        supports_json_mode = not is_reasoning_model
+        
+        # Build API call parameters for Responses API
+        api_params = {
+            "model": model,
+            "input": messages,  # Changed from "messages" to "input"
+            "timeout": 300,
+            "store": use_stateful,  # True for stateful, False for stateless
+        }
+        
+        # Add previous_response_id for stateful chaining (if provided)
+        if use_stateful and previous_response_id:
+            api_params["previous_response_id"] = previous_response_id
+            st.info(f"🔗 Chaining to previous response: {previous_response_id[:20]}...")
+        
+        # Add temperature for standard models (o1/o3 don't support it)
+        if not is_reasoning_model:
+            api_params["temperature"] = 0.1  # Low temperature for consistency
+        
+        # Add file_search tool if training files exist
+        # NOTE: Responses API file_search requires vector_store_ids, not file_ids
+        # For now, we'll skip file_search in Responses API and include training data in prompt
+        # To use file_search properly, you need to create a vector store first
+        if training_file_ids:
+            st.warning("⚠️ File search with Responses API requires vector stores. Training data will be included in prompt instead.")
+            # TODO: Implement vector store creation and use vector_store_ids
+            # api_params["tools"] = [
+            #     {
+            #         "type": "file_search",
+            #         "vector_store_ids": [vector_store_id]
+            #     }
+            # ]
+        
+        # Add structured output with schema (Responses API structured outputs)
+        # Define the exact schema we expect for the matrix response
+        if supports_json_mode:
+            api_params["text"] = {
+                "format": {
+                    "type": "json_schema",
+                    "name": "mentorship_compatibility_matrix",
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "matrix": {
+                                "type": "array",
+                                "description": "Array of mentor compatibility scores",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "mentor_id": {
+                                            "type": "string",
+                                            "description": "The mentor's ID"
+                                        },
+                                        "scores": {
+                                            "type": "array",
+                                            "description": "Compatibility scores for each mentee",
+                                            "items": {
+                                                "type": "object",
+                                                "properties": {
+                                                    "mentee_id": {
+                                                        "type": "string",
+                                                        "description": "The mentee's ID"
+                                                    },
+                                                    "percentage": {
+                                                        "type": "number",
+                                                        "description": "Match percentage (0-100)",
+                                                        "minimum": 0,
+                                                        "maximum": 100
+                                                    }
+                                                },
+                                                "required": ["mentee_id", "percentage"],
+                                                "additionalProperties": False
+                                            }
+                                        }
+                                    },
+                                    "required": ["mentor_id", "scores"],
+                                    "additionalProperties": False
+                                }
+                            }
+                        },
+                        "required": ["matrix"],
+                        "additionalProperties": False
+                    },
+                    "strict": True
+                }
+            }
+        
+        # Retry logic for rate limits - ONLY for the API call itself
+        max_retries = 5
+        retry_count = 0
+        response = None
+        
+        while retry_count < max_retries:
+            try:
+                st.caption(f"🔄 API attempt {retry_count + 1}/{max_retries}...")
+                response = responses_api.create(**api_params)
+                # API call succeeded, break out immediately
+                st.caption(f"✅ API call succeeded on attempt {retry_count + 1}")
+                break
+                
+            except Exception as e:
+                error_str = str(e)
+                error_type = type(e).__name__
+                
+                # Log the actual exception for debugging
+                st.caption(f"⚠️ Exception on attempt {retry_count + 1}: {error_type}")
+                with st.expander(f"🔍 Debug: Exception details (attempt {retry_count + 1})"):
+                    st.code(f"Type: {error_type}\nMessage: {error_str[:500]}")
+                
+                # Check if it's a rate limit error (429)
+                if "rate_limit_exceeded" in error_str or "429" in error_str:
+                    retry_count += 1
+                    
+                    if retry_count >= max_retries:
+                        st.error(f"❌ Rate limit exceeded after {max_retries} attempts")
+                        show_debug_info()
+                        return None
+                    
+                    # Extract wait time from error message
+                    import re
+                    wait_match = re.search(r'try again in ([\d.]+)s', error_str)
+                    if wait_match:
+                        wait_time = float(wait_match.group(1))
+                    else:
+                        # Exponential backoff if no wait time specified
+                        wait_time = 2 ** retry_count
+                    
+                    # Add buffer (2-5 seconds)
+                    buffer = 3
+                    total_wait = wait_time + buffer
+                    
+                    st.warning(f"⏳ Rate limit (429). Waiting {total_wait:.1f}s before attempt {retry_count+1}/{max_retries}...")
+                    st.caption(f"💡 This is normal with rapid batch processing. The system will automatically retry.")
+                    
+                    time.sleep(total_wait)
+                    continue  # Retry
+                else:
+                    # Not a rate limit error, fail immediately
+                    st.error(f"❌ API call failed with {error_type}: {str(e)[:200]}")
+                    show_debug_info()
+                    return None
+        
+        # Check if we got a response
+        if response is None:
+            st.error("❌ Failed to get response after retries")
+            return None
+        
+        # Calculate elapsed time
+        elapsed = time.time() - start_time
+        minutes = int(elapsed // 60)
+        seconds = int(elapsed % 60)
+        st.success(f"✅ Response received in {minutes}m {seconds}s")
+        
+        # Extract response content (Responses API has specific structure)
+        if hasattr(response, 'output'):
+            # Responses API format: output is a list of ResponseOutputMessage
+            # Structure: response.output[0].content[0].text
+            try:
+                if isinstance(response.output, list) and len(response.output) > 0:
+                    output_msg = response.output[0]
+                    if hasattr(output_msg, 'content') and isinstance(output_msg.content, list) and len(output_msg.content) > 0:
+                        response_content = output_msg.content[0].text
+                    else:
+                        response_content = str(output_msg)
+                else:
+                    response_content = str(response.output)
+                st.info("📋 Using Responses API output format")
+            except Exception as e:
+                st.error(f"❌ Error extracting Responses API content: {e}")
+                response_content = str(response.output)
+        elif hasattr(response, 'choices'):
+            # Chat Completions format (fallback)
+            response_content = response.choices[0].message.content
+            st.info("📋 Using Chat Completions output format")
+        else:
+            st.error("❌ Unknown response format")
+            st.write(f"Response type: {type(response)}")
+            st.write(f"Response attributes: {[attr for attr in dir(response) if not attr.startswith('_')]}")
+            return None
+        
+        # Display token usage (handle both API formats)
+        if hasattr(response, 'usage'):
+            usage = response.usage
+            
+            # Try Responses API field names first, then Chat Completions names
+            actual_prompt_tokens = (
+                getattr(usage, 'input_tokens', None) or 
+                getattr(usage, 'prompt_tokens', 0)
+            )
+            actual_completion_tokens = (
+                getattr(usage, 'output_tokens', None) or 
+                getattr(usage, 'completion_tokens', 0)
+            )
+            
+            actual_cost = estimate_api_cost(actual_prompt_tokens, actual_completion_tokens, model)
+            
+            st.markdown(f"""
+            <div class="success-card">
+                <strong>✅ Actual API Usage:</strong><br>
+                • Input tokens: {actual_prompt_tokens:,}<br>
+                • Output tokens: {actual_completion_tokens:,}<br>
+                • Total tokens: {actual_prompt_tokens + actual_completion_tokens:,}<br>
+                • Actual cost: ${actual_cost:.4f}
+            </div>
+            """, unsafe_allow_html=True)
+        
+        # Store debug info in session state for troubleshooting
+        if 'last_api_request' not in st.session_state:
+            st.session_state.last_api_request = {}
+        if 'last_api_response' not in st.session_state:
+            st.session_state.last_api_response = {}
+        
+        st.session_state.last_api_request = {
+            'prompt': prompt,
+            'full_message': full_message,
+            'model': model,
+            'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
+        }
+        # Get response ID for stateful chaining
+        response_id = getattr(response, 'id', None)
+        
+        st.session_state.last_api_response = {
+            'content': response_content,
+            'tokens': {
+                'input': actual_prompt_tokens if hasattr(response, 'usage') else 0,
+                'output': actual_completion_tokens if hasattr(response, 'usage') else 0,
+                'total': (actual_prompt_tokens + actual_completion_tokens) if hasattr(response, 'usage') else 0
+            },
+            'timestamp': time.strftime('%Y-%m-%d %H:%M:%S'),
+            'api_type': api_name,
+            'response_id': response_id
+        }
+        
+        # Return both content and response_id (for stateful chaining)
+        if use_stateful:
+            return response_content, response_id
+        else:
+            return response_content
+        
+    except Exception as e:
+        st.error(f"❌ Error: {str(e)}")
+        show_debug_info()
+        return None
+def call_openai_api_chat_completions_legacy(prompt, mentees_df, mentors_df, training_data, api_key, model="gpt-4o-mini", mentor_subset=None):
+    """
+    Legacy Chat Completions API implementation (fallback when Responses API not available)
+    
+    This is the original implementation kept for backward compatibility.
     """
     try:
         client = OpenAI(api_key=api_key)
         
         # If mentor_subset provided, filter mentors_df
         if mentor_subset:
-            mentors_to_use = mentors_df[mentors_df['Code mentor'].isin(mentor_subset)]
+            mentors_to_use = mentors_df[mentors_df[MENTOR_COLUMNS['id']].isin(mentor_subset)]
         else:
             mentors_to_use = mentors_df
         
@@ -1026,156 +765,83 @@ def call_openai_api_with_assistants(prompt, mentees_df, mentors_df, training_dat
         
         # Estimate tokens and cost
         full_message = f"{prompt}\n\n{combined_data}\n\nGenerate matches for ALL mentees in JSON format as specified."
-        prompt_tokens = estimate_tokens(full_message, model)
-        estimated_completion_tokens = len(mentees_df) * 500  # Rough estimate
-        estimated_cost = estimate_api_cost(prompt_tokens, estimated_completion_tokens, model)
-        
-        # Display token and cost information
-        st.markdown(f"""
-        <div class="cost-estimate">
-            <strong>📊 API Usage Estimate:</strong><br>
-            • Prompt tokens: ~{prompt_tokens:,}<br>
-            • Expected completion tokens: ~{estimated_completion_tokens:,}<br>
-            • Estimated cost: ${estimated_cost:.4f}<br>
-            • Model: {model}
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # Check token limits
-        total_tokens = prompt_tokens + estimated_completion_tokens
-        model_limits = {
-            "gpt-4o-mini": 128000,
-            "gpt-4o": 128000,
-            "gpt-4": 8192,
-            "gpt-3.5-turbo": 16384
-        }
-        
-        if total_tokens > model_limits.get(model, 128000):
-            st.markdown(f"""
-            <div class="token-warning">
-                <strong>⚠️ Token Limit Warning:</strong><br>
-                Estimated tokens ({total_tokens:,}) may exceed model limit ({model_limits.get(model, 128000):,}).<br>
-                Try Direct API with fewer mentees or use a different approach.
-            </div>
-            """, unsafe_allow_html=True)
-            return None
-        
-        # Create the assistant (with file_search if training files uploaded to OpenAI)
-        st.info("🤖 Creating AI assistant for matching...")
         
         # Check if training files are uploaded to OpenAI storage
         training_file_ids = st.session_state.get('training_file_ids', [])
-        vector_store = None  # Initialize for cleanup
         
+        # Prepare messages for Chat Completions API
+        messages = [
+            {
+                "role": "system",
+                "content": "You are a mentorship matching expert for IMFAHE's International Mentor Program. You MUST respond with valid JSON only, following the exact format specified."
+            },
+            {
+                "role": "user",
+                "content": full_message
+            }
+        ]
+        
+        # Add file_search attachments if training files exist (may not work in all versions)
         if training_file_ids:
-            st.info(f"📚 Enabling file_search for {len(training_file_ids)} training file(s)...")
-            # Create a vector store with the training files
-            vector_store = client.beta.vector_stores.create(
-                name=f"Training Data {time.strftime('%Y%m%d_%H%M%S')}",
-                file_ids=training_file_ids
-            )
-            
-            assistant = client.beta.assistants.create(
-                name="Mentorship Matcher",
-                instructions=prompt,
-                model=model,
-                tools=[{"type": "file_search"}],
-                tool_resources={"file_search": {"vector_store_ids": [vector_store.id]}}
-            )
-        else:
-            assistant = client.beta.assistants.create(
-                name="Mentorship Matcher",
-                instructions=prompt,
-                model=model
-            )
+            st.info(f"📚 Including {len(training_file_ids)} training file(s) for context...")
+            try:
+                messages[1]["attachments"] = [
+                    {
+                        "file_id": file_id,
+                        "tools": [{"type": "file_search"}]
+                    }
+                    for file_id in training_file_ids
+                ]
+            except:
+                st.warning("⚠️ Could not attach files with Chat Completions API")
         
-        # Create a thread and send data directly in message
-        st.info("🔄 Sending data and processing matches...")
-        thread = client.beta.threads.create()
+        st.info("🔄 Sending request to OpenAI Chat Completions API (Legacy)...")
         
-        message = client.beta.threads.messages.create(
-            thread_id=thread.id,
-            role="user",
-            content=full_message
-        )
+        # Check if model supports response_format and temperature (o1/o3 models don't)
+        is_reasoning_model = any(x in model.lower() for x in ['o1-', 'o3-', 'o1', 'o3'])
+        supports_json_mode = not is_reasoning_model
         
-        # Run the assistant
-        run = client.beta.threads.runs.create(
-            thread_id=thread.id,
-            assistant_id=assistant.id
-        )
+        # Build API call parameters
+        api_params = {
+            "model": model,
+            "messages": messages,
+            "timeout": 300,
+        }
         
-        # Wait for completion with timeout
-        max_wait_time = 600  # 10 minutes timeout (Assistants API can be slow)
+        # Add temperature for standard models (o1/o3 don't support it)
+        if not is_reasoning_model:
+            api_params["temperature"] = 0.1
+        
+        # Add JSON mode if supported
+        if supports_json_mode:
+            api_params["response_format"] = {"type": "json_object"}
+        
         start_time = time.time()
+        response = client.chat.completions.create(**api_params)
+        elapsed = time.time() - start_time
         
-        progress_placeholder = st.empty()
+        minutes = int(elapsed // 60)
+        seconds = int(elapsed % 60)
+        st.success(f"✅ Response received in {minutes}m {seconds}s")
         
-        while run.status in ['queued', 'in_progress', 'cancelling']:
-            time.sleep(3)
-            run = client.beta.threads.runs.retrieve(
-                thread_id=thread.id,
-                run_id=run.id
-            )
-            
-            elapsed = time.time() - start_time
-            minutes = int(elapsed // 60)
-            seconds = int(elapsed % 60)
-            
-            if elapsed > max_wait_time:
-                progress_placeholder.error("⏱️ Processing timeout after 10 minutes. Try using 'Direct API' instead or reduce data size.")
-                # Cleanup
-                try:
-                    client.beta.assistants.delete(assistant.id)
-                    if vector_store:
-                        client.beta.vector_stores.delete(vector_store.id)
-                except:
-                    pass
-                return None
-            
-            # Show detailed progress
-            if run.status == 'queued':
-                progress_placeholder.warning(f"⏳ Queued - waiting for OpenAI resources... ({minutes}m {seconds}s)")
-            else:
-                progress_placeholder.info(f"🤖 Processing matches... ({minutes}m {seconds}s)")
-        
-        if run.status == 'completed':
-            # Get the messages
-            messages = client.beta.threads.messages.list(
-                thread_id=thread.id
-            )
-            
-            # Extract the assistant's response
-            for msg in messages.data:
-                if msg.role == 'assistant':
-                    response_content = msg.content[0].text.value
-                    
-                    # Clean up (delete assistant and vector store)
-                    try:
-                        client.beta.assistants.delete(assistant.id)
-                        if vector_store:
-                            client.beta.vector_stores.delete(vector_store.id)
-                    except:
-                        pass
-                    
-                    return response_content
-        else:
-            st.error(f"❌ Processing failed with status: {run.status}")
-            if hasattr(run, 'last_error'):
-                st.error(f"Error details: {run.last_error}")
-        
-        # Cleanup on failure
-        try:
-            client.beta.assistants.delete(assistant.id)
-            if vector_store:
-                client.beta.vector_stores.delete(vector_store.id)
-        except:
-            pass
-        return None
+        # Extract response content
+        response_content = response.choices[0].message.content
+        return response_content
         
     except Exception as e:
-        st.error(f"❌ Error: {str(e)}")
+        st.error(f"❌ Legacy API Error: {str(e)}")
         return None
+
+
+# Keep old function name as alias for backward compatibility
+def call_openai_api_with_assistants(prompt, mentees_df, mentors_df, training_data, api_key, model="gpt-4o-mini", mentor_subset=None, use_stateful=False, previous_response_id=None, is_first_batch=True):
+    """
+    DEPRECATED: Assistants API will be deprecated in 2025.
+    This function now redirects to the Responses API.
+    
+    See: https://platform.openai.com/docs/guides/migrate-to-responses
+    """
+    return call_openai_api_with_chat_completions(prompt, mentees_df, mentors_df, training_data, api_key, model, mentor_subset, use_stateful, previous_response_id, is_first_batch)
 
 def parse_llm_response(response_text):
     """Parse the LLM response and extract matches"""
@@ -1211,43 +877,74 @@ def parse_llm_response(response_text):
             st.text(response_text[:2000])
             return None
         
-def generate_matrix_in_batches(mentees_df, mentors_df, training_data, api_key, model, batch_size=15):
+def generate_matrix_in_batches(mentees_df, mentors_df, training_data, api_key, model, batch_size=15, use_stateful=False):
     """Generate compatibility matrix in batches to avoid token limits
     
     Args:
         batch_size: Number of mentors to process per batch (default 15)
+        use_stateful: Enable stateful mode (store=True) for efficient batch processing
+                     When True, only the first batch sends full context, subsequent batches
+                     only send new mentor data and reference the previous response.
     
     Returns:
         Complete matrix DataFrame
     """
-    all_mentor_ids = mentors_df['Code mentor'].tolist()
-    all_mentee_ids = mentees_df['Code Mentee'].tolist()
+    all_mentor_ids = mentors_df[MENTOR_COLUMNS['id']].tolist()
+    all_mentee_ids = mentees_df[MENTEE_COLUMNS['id']].tolist()
     
     # Split mentors into batches
     mentor_batches = [all_mentor_ids[i:i + batch_size] for i in range(0, len(all_mentor_ids), batch_size)]
     
-    st.info(f"📦 Processing in {len(mentor_batches)} batches ({batch_size} mentors per batch)")
+    mode_info = "🔗 STATEFUL MODE" if use_stateful else "📦 STATELESS MODE"
+    st.info(f"{mode_info}: Processing in {len(mentor_batches)} batches ({batch_size} mentors per batch)")
+    
+    if use_stateful:
+        st.markdown("""
+        <div class="info-card">
+            <strong>🔗 Stateful Batching Enabled:</strong><br>
+            • First batch: Sends full mentee data + initial mentors (~high tokens)<br>
+            • Subsequent batches: Only new mentors (~low tokens, 90% savings)<br>
+            • Context preserved via previous_response_id chaining
+        </div>
+        """, unsafe_allow_html=True)
     
     combined_matrix_dict = {}
+    previous_response_id = None  # Track for stateful chaining
     
     # Process each batch
     for batch_num, mentor_batch in enumerate(mentor_batches, 1):
-        st.info(f"🔄 Batch {batch_num}/{len(mentor_batches)}: Processing {len(mentor_batch)} mentors ({mentor_batch[0]} to {mentor_batch[-1]})")
+        is_first_batch = (batch_num == 1)
         
-        # Call API for this batch
+        batch_label = "FIRST BATCH (full context)" if is_first_batch else f"Batch {batch_num} (mentors only)"
+        st.info(f"🔄 {batch_label}: Processing {len(mentor_batch)} mentors ({mentor_batch[0]} to {mentor_batch[-1]})")
+        
+        # Call API for this batch with stateful parameters
         training_file_ids = st.session_state.get('training_file_ids', [])
-        response = call_openai_api_with_assistants(
-            create_matrix_prompt(use_file_search=len(training_file_ids) > 0),
+        result = call_openai_api_with_assistants(
+            get_prompt_for_api(),
             mentees_df,
             mentors_df,
             training_data,
             api_key,
             model,
-            mentor_subset=mentor_batch
+            mentor_subset=mentor_batch,
+            use_stateful=use_stateful,
+            previous_response_id=previous_response_id,
+            is_first_batch=is_first_batch
         )
+        
+        # Handle both tuple (stateful) and string (stateless) returns
+        if use_stateful and isinstance(result, tuple):
+            response, response_id = result
+            previous_response_id = response_id  # Chain for next batch
+            if response_id:
+                st.success(f"✅ Response ID saved for chaining: {response_id[:20]}...")
+        else:
+            response = result
         
         if not response:
             st.error(f"❌ Batch {batch_num} failed to get response")
+            show_debug_info()  # Show debug info for failed batches
             continue
         
         # Parse this batch's response
@@ -1259,7 +956,8 @@ def generate_matrix_in_batches(mentees_df, mentors_df, training_data, api_key, m
         
         # DEBUG: Show what mentors we got back vs what we expected
         received_mentors = list(batch_matrix_df.index)
-        expected_mentors_set = set(mentor_batch)
+        # Convert to strings for comparison (batch_matrix_df.index contains strings from JSON)
+        expected_mentors_set = set(str(m) for m in mentor_batch)
         received_mentors_set = set(received_mentors)
         
         # Track what we're adding and check for overwrites
@@ -1297,9 +995,12 @@ def generate_matrix_in_batches(mentees_df, mentors_df, training_data, api_key, m
                 for m in sorted(missing_in_batch):
                     st.write(f"- {m}")
         
-        # Small delay between batches to avoid rate limits
+        # Delay between batches to avoid rate limits
+        # Longer delay in stateful mode since we're making rapid successive calls
         if batch_num < len(mentor_batches):
-            time.sleep(2)
+            delay = 5 if use_stateful else 2
+            st.caption(f"⏳ Waiting {delay}s before next batch to avoid rate limits...")
+            time.sleep(delay)
     
     # Combine all batches into single DataFrame
     if not combined_matrix_dict:
@@ -1310,13 +1011,15 @@ def generate_matrix_in_batches(mentees_df, mentors_df, training_data, api_key, m
     st.info("📊 **Combining all batches into final matrix...**")
     
     complete_matrix_df = pd.DataFrame(combined_matrix_dict).T
-    complete_matrix_df = complete_matrix_df[sorted(all_mentee_ids)]
+    # Convert mentee IDs to strings to match DataFrame columns (which come from JSON as strings)
+    complete_matrix_df = complete_matrix_df[[str(m) for m in sorted(all_mentee_ids)]]
     
     # Final validation with detailed breakdown
     mentors_received = len(complete_matrix_df)
     expected_count = len(all_mentor_ids)
     mentors_in_dict = set(complete_matrix_df.index)
-    mentors_requested = set(all_mentor_ids)
+    # Convert to strings for comparison (complete_matrix_df.index contains strings from JSON)
+    mentors_requested = set(str(m) for m in all_mentor_ids)
     
     # Check for discrepancies
     missing_from_dict = mentors_requested - mentors_in_dict
@@ -1347,7 +1050,8 @@ def generate_matrix_in_batches(mentees_df, mentors_df, training_data, api_key, m
     
     # RETRY LOGIC: If mentors are missing, try up to 3 times
     if mentors_received < expected_count:
-        missing = set(all_mentor_ids) - set(complete_matrix_df.index)
+        # Convert to strings for comparison (complete_matrix_df.index contains strings from JSON)
+        missing = set(str(m) for m in all_mentor_ids) - set(complete_matrix_df.index)
         st.warning(f"⚠️ Missing {len(missing)} mentors after initial batches")
         
         with st.expander(f"📋 Missing mentors ({len(missing)})"):
@@ -1357,8 +1061,8 @@ def generate_matrix_in_batches(mentees_df, mentors_df, training_data, api_key, m
         # Try up to 3 retries
         max_retries = 3
         for retry_num in range(1, max_retries + 1):
-            # Recalculate what's still missing
-            current_missing = set(all_mentor_ids) - set(complete_matrix_df.index)
+            # Recalculate what's still missing (convert to strings for comparison)
+            current_missing = set(str(m) for m in all_mentor_ids) - set(complete_matrix_df.index)
             
             if not current_missing:
                 st.success(f"🎉 All mentors retrieved!")
@@ -1368,15 +1072,26 @@ def generate_matrix_in_batches(mentees_df, mentors_df, training_data, api_key, m
             
             try:
                 training_file_ids = st.session_state.get('training_file_ids', [])
-                retry_response = call_openai_api_with_assistants(
-                    create_matrix_prompt(use_file_search=len(training_file_ids) > 0),
+                retry_result = call_openai_api_with_assistants(
+                    get_prompt_for_api(),
                     mentees_df,
                     mentors_df,
                     training_data,
                     api_key,
                     model,
-                    mentor_subset=list(current_missing)
+                    mentor_subset=list(current_missing),
+                    use_stateful=use_stateful,
+                    previous_response_id=previous_response_id if use_stateful else None,
+                    is_first_batch=False  # Retries are always subsequent
                 )
+                
+                # Handle both tuple (stateful) and string (stateless) returns
+                if use_stateful and isinstance(retry_result, tuple):
+                    retry_response, retry_response_id = retry_result
+                    if retry_response_id:
+                        previous_response_id = retry_response_id  # Update chain
+                else:
+                    retry_response = retry_result
                 
                 if not retry_response:
                     st.error(f"❌ Retry {retry_num} failed to get response")
@@ -1420,8 +1135,8 @@ def generate_matrix_in_batches(mentees_df, mentors_df, training_data, api_key, m
                     st.info("⏳ Waiting 5 seconds before next retry...")
                     time.sleep(5)
         
-        # Final check after all retries
-        final_missing = set(all_mentor_ids) - set(complete_matrix_df.index)
+        # Final check after all retries (convert to strings for comparison)
+        final_missing = set(str(m) for m in all_mentor_ids) - set(complete_matrix_df.index)
         if final_missing:
             st.warning(f"⚠️ After {max_retries} retries, still missing {len(final_missing)} mentors")
             with st.expander(f"📋 Permanently missing mentors ({len(final_missing)})"):
@@ -1446,6 +1161,40 @@ def parse_matrix_response(response_text, expected_mentors, expected_mentees):
             response_text = response_text[:-3]
         response_text = response_text.strip()
         
+        # IMPROVED: Extract JSON if AI added explanatory text before/after
+        # Look for the first { and last } to extract just the JSON portion
+        import re
+        
+        # Try to find JSON object boundaries
+        first_brace = response_text.find('{')
+        last_brace = response_text.rfind('}')
+        
+        if first_brace != -1 and last_brace != -1 and first_brace < last_brace:
+            # Extract only the JSON portion
+            json_portion = response_text[first_brace:last_brace + 1]
+            
+            # Check if we had to extract (AI added text)
+            if first_brace > 0 or last_brace < len(response_text) - 1:
+                before_text = response_text[:first_brace].strip()
+                after_text = response_text[last_brace + 1:].strip()
+                
+                st.warning("⚠️ AI included explanatory text instead of pure JSON. Attempting to extract JSON...")
+                
+                if before_text:
+                    with st.expander("📝 Text before JSON (should be empty)"):
+                        st.text(before_text[:500])  # Show first 500 chars
+                
+                if after_text:
+                    with st.expander("📝 Text after JSON (should be empty)"):
+                        st.text(after_text[:500])
+            
+            response_text = json_portion
+        else:
+            st.error("❌ Could not find JSON object boundaries in response")
+            with st.expander("View raw response"):
+                st.text(response_text[:2000])
+            return None
+        
         # Parse JSON
         data = json.loads(response_text)
         
@@ -1462,13 +1211,14 @@ def parse_matrix_response(response_text, expected_mentors, expected_mentees):
         all_mentees = set()
         
         # Track validation issues
-        expected_mentor_set = set(expected_mentors)
-        expected_mentee_set = set(expected_mentees)
+        # Convert to strings to match JSON response format (IDs come as strings from JSON)
+        expected_mentor_set = set(str(x) for x in expected_mentors)
+        expected_mentee_set = set(str(x) for x in expected_mentees)
         wrong_mentors = []  # Mentors not in expected list
         wrong_mentees = []  # Mentees not in expected list
         
         for mentor_entry in matrix_data:
-            mentor_id = mentor_entry['mentor_id']
+            mentor_id = str(mentor_entry['mentor_id'])  # Ensure string for comparison
             
             # VALIDATION 1: Check if this mentor ID was requested
             if mentor_id not in expected_mentor_set:
@@ -1478,7 +1228,7 @@ def parse_matrix_response(response_text, expected_mentors, expected_mentees):
             
             scores = {}
             for score_entry in mentor_entry['scores']:
-                mentee_id = score_entry['mentee_id']
+                mentee_id = str(score_entry['mentee_id'])  # Ensure string for comparison
                 percentage = score_entry['percentage']
                 
                 # VALIDATION 2: Check if this mentee ID is valid
@@ -1515,15 +1265,38 @@ def parse_matrix_response(response_text, expected_mentors, expected_mentees):
         
         st.info(f"📊 Valid data received: {mentors_received}/{expected_mentor_count} mentors, {mentees_received}/{expected_mentee_count} mentees")
         
+        # TASK 4: Validate completeness of scores BEFORE creating DataFrame
+        expected_total_scores = expected_mentor_count * expected_mentee_count
+        actual_total_scores = sum(len(scores) for scores in matrix_dict.values())
+        
+        if actual_total_scores < expected_total_scores:
+            missing_count = expected_total_scores - actual_total_scores
+            completion_rate = (actual_total_scores / expected_total_scores) * 100 if expected_total_scores > 0 else 0
+            
+            st.error(f"🚨 INCOMPLETE RESPONSE: Expected {expected_total_scores} scores, got {actual_total_scores} ({completion_rate:.1f}% complete)")
+            st.error(f"   Missing {missing_count} combinations!")
+            st.error(f"   ⚠️ The AI is still omitting combinations despite instructions.")
+            
+            # Log which mentors have incomplete data
+            with st.expander("📋 Mentors with incomplete score arrays"):
+                for mentor_id, scores in matrix_dict.items():
+                    scores_count = len(scores)
+                    if scores_count < expected_mentee_count:
+                        st.warning(f"   • Mentor {mentor_id}: {scores_count}/{expected_mentee_count} mentees ({expected_mentee_count - scores_count} missing)")
+        elif actual_total_scores == expected_total_scores:
+            st.success(f"✅ COMPLETE RESPONSE: All {expected_total_scores} scores received!")
+        
         if mentors_received < expected_mentor_count:
-            missing_mentors = set(expected_mentors) - set(matrix_dict.keys())
+            # Convert to strings for comparison (matrix_dict.keys() contains strings)
+            missing_mentors = set(str(m) for m in expected_mentors) - set(matrix_dict.keys())
             st.warning(f"⚠️ Missing {len(missing_mentors)} requested mentor(s)")
             with st.expander(f"📋 Missing mentors ({len(missing_mentors)})"):
                 for m in sorted(missing_mentors):
                     st.write(f"- {m}")
         
         if mentees_received < expected_mentee_count:
-            missing_mentees = set(expected_mentees) - all_mentees
+            # Convert to strings for comparison (all_mentees contains strings)
+            missing_mentees = set(str(m) for m in expected_mentees) - all_mentees
             st.warning(f"⚠️ Missing {len(missing_mentees)} mentee(s) in responses")
             with st.expander(f"📋 Missing mentees ({len(missing_mentees)})"):
                 for m in sorted(missing_mentees):
@@ -1536,17 +1309,24 @@ def parse_matrix_response(response_text, expected_mentors, expected_mentees):
         
         df = pd.DataFrame(matrix_dict).T  # Transpose so mentors are rows, mentees are columns
         
-        # Fill missing mentees with median score (50) if any are missing
-        for mentee in expected_mentees:
-            if mentee not in df.columns:
-                df[mentee] = 50  # Default score for missing data
+        # Fill missing mentees with LOW score (30) - AI omitted these (likely poor matches)
+        # Convert to strings for comparison (df.columns contains strings)
+        missing_mentees = [m for m in expected_mentees if str(m) not in df.columns]
+        if missing_mentees:
+            st.warning(f"⚠️ {len(missing_mentees)} mentee column(s) missing from matrix. Filling with 30% (assumed poor match).")
+            st.caption("The AI omitted these combinations despite instructions. This indicates likely poor matches.")
+            show_debug_info()  # Allow user to inspect request/response
+            for mentee in missing_mentees:
+                df[mentee] = 30  # Assume omitted = poor match, score low (not neutral 50)
         
-        df = df[sorted(expected_mentees)]  # Sort mentee columns
+        # Sort mentee columns (convert to strings to match df.columns)
+        df = df[[str(m) for m in sorted(expected_mentees)]]
         
         return df
         
     except (json.JSONDecodeError, ValueError, KeyError) as e:
         st.error(f"❌ Error parsing matrix response: {str(e)}")
+        show_debug_info()  # Show debug info for parsing errors
         with st.expander("View raw response"):
             st.text(response_text[:2000])
         return None
@@ -1572,8 +1352,10 @@ def hungarian_assignment(matrix_df, max_mentees_per_mentor=2):
     # Check for NaN values
     nan_count = matrix_df.isna().sum().sum()
     if nan_count > 0:
-        st.warning(f"⚠️ Found {nan_count} NaN values in matrix. Replacing with 50% (neutral score)...")
-        matrix_df = matrix_df.fillna(50)
+        st.warning(f"⚠️ Found {nan_count} NaN values in matrix. Replacing with 30% (poor match - AI omitted these)...")
+        st.caption("NaN values indicate the AI skipped these combinations despite instructions. Treating as poor matches.")
+        show_debug_info()  # Allow user to inspect request/response
+        matrix_df = matrix_df.fillna(30)
     
     # Check for inf values
     inf_mask = np.isinf(matrix_df.values)
@@ -1661,8 +1443,11 @@ def get_reasoning_for_assignments(assignments, mentees_df, mentors_df, api_key, 
         assignment_details = []
         for mentee_id, mentor_id, score in assignments:
             try:
-                mentee_row = mentees_df[mentees_df['Code Mentee'] == mentee_id].iloc[0]
-                mentor_row = mentors_df[mentors_df['Code mentor'] == mentor_id].iloc[0]
+                # Convert IDs to int for comparison (assignments may contain string IDs, DataFrame has int IDs)
+                mentee_id_int = int(mentee_id)
+                mentor_id_int = int(mentor_id)
+                mentee_row = mentees_df[mentees_df[MENTEE_COLUMNS['id']] == mentee_id_int].iloc[0]
+                mentor_row = mentors_df[mentors_df[MENTOR_COLUMNS['id']] == mentor_id_int].iloc[0]
                 
                 # Helper to safely get string values
                 def safe_str(value):
@@ -1674,12 +1459,15 @@ def get_reasoning_for_assignments(assignments, mentees_df, mentors_df, api_key, 
                     'mentee_id': safe_str(mentee_id),
                     'mentor_id': safe_str(mentor_id),
                     'score': int(score) if not pd.isna(score) else 0,
-                    'mentee_field': safe_str(mentee_row.get('Mentee Field of expertise', '')),
-                    'mentee_skills': safe_str(mentee_row.get('Mentee Specific hard skills that you have', '')),
-                    'mentee_goals': safe_str(mentee_row.get('Mentee Career goals for the next 2 years', '')),
-                    'mentor_field': safe_str(mentor_row.get('Field of expertise', '')),
-                    'mentor_skills': safe_str(mentor_row.get('Mentor Specific Hard Skills and Professional Competencies has Mastered', '')),
-                    'mentor_experience': safe_str(mentor_row.get('Mentor Years of Professional Experience in his her Field', ''))
+                    'mentee_field': safe_str(mentee_row.get(MENTEE_COLUMNS['field'], '')),
+                    'mentee_specialization': safe_str(mentee_row.get(MENTEE_COLUMNS['specialization'], '')),
+                    'mentee_guidance_areas': safe_str(mentee_row.get(MENTEE_COLUMNS['guidance_areas'], '')),
+                    'mentee_goals': safe_str(mentee_row.get(MENTEE_COLUMNS['career_goals'], '')),
+                    'mentee_other_info': safe_str(mentee_row.get(MENTEE_COLUMNS['other_info'], '')),  # NEW
+                    'mentor_field': safe_str(mentor_row.get(MENTOR_COLUMNS['field'], '')),
+                    'mentor_specialization': safe_str(mentor_row.get(MENTOR_COLUMNS['specialization'], '')),
+                    'mentor_position': safe_str(mentor_row.get(MENTOR_COLUMNS['current_position'], '')),  # NEW
+                    'mentor_experience': safe_str(mentor_row.get(MENTOR_COLUMNS['experience_years'], ''))
                 })
             except Exception as e:
                 st.warning(f"⚠️ Could not extract details for {mentee_id} → {mentor_id}: {str(e)}")
@@ -1689,10 +1477,13 @@ def get_reasoning_for_assignments(assignments, mentees_df, mentors_df, api_key, 
                     'mentor_id': str(mentor_id),
                     'score': int(score) if isinstance(score, (int, float)) else 0,
                     'mentee_field': '',
-                    'mentee_skills': '',
+                    'mentee_specialization': '',
+                    'mentee_guidance_areas': '',
                     'mentee_goals': '',
+                    'mentee_other_info': '',  # NEW
                     'mentor_field': '',
-                    'mentor_skills': '',
+                    'mentor_specialization': '',
+                    'mentor_position': '',  # NEW
                     'mentor_experience': ''
                 })
         
@@ -1714,61 +1505,212 @@ For each assignment, explain in 2-3 sentences why this is a good match based on:
 ASSIGNMENTS:
 """
         for ad in assignment_details:
+            # Safely truncate fields
+            mentee_spec = str(ad.get('mentee_specialization', ''))[:100]
+            mentee_guidance = str(ad.get('mentee_guidance_areas', ''))[:100]
+            mentee_goals = str(ad.get('mentee_goals', ''))[:100]
+            mentee_other = str(ad.get('mentee_other_info', ''))[:100]
+            mentor_spec = str(ad.get('mentor_specialization', ''))[:100]
+            mentor_pos = str(ad.get('mentor_position', ''))[:80]
+            
             prompt += f"""
 {ad['mentee_id']} → {ad['mentor_id']} (Score: {ad['score']}%)
 - Mentee field: {ad['mentee_field']}
-- Mentee skills: {ad['mentee_skills'][:100]}...
-- Mentee goals: {ad['mentee_goals'][:100]}...
+- Mentee specialization: {mentee_spec}...
+- Mentee guidance needs: {mentee_guidance}...
+- Mentee goals: {mentee_goals}...
+- Mentee other info: {mentee_other}...
 - Mentor field: {ad['mentor_field']}
-- Mentor skills: {ad['mentor_skills'][:100]}...
+- Mentor position: {mentor_pos}...
+- Mentor specialization: {mentor_spec}...
 - Mentor experience: {ad['mentor_experience']} years
 
 """
         
         prompt += """
 OUTPUT FORMAT (IMPORTANT):
-Return ONLY a JSON array with this exact structure:
-[
-  {
-    "mentee_id": "EXACT_CODE",
-    "mentor_id": "EXACT_CODE",
-    "reasoning": "2-3 sentence explanation"
-  }
-]
+Return ONLY a JSON object with this exact structure:
+{
+  "reasonings": [
+    {
+      "mentee_id": "EXACT_CODE",
+      "mentor_id": "EXACT_CODE",
+      "reasoning": "2-3 sentence explanation"
+    }
+  ]
+}
 
-No markdown, no extra text, just the JSON array."""
+No markdown, no extra text, just the JSON object."""
         
         # Make API call with progress bar
         progress_text = st.empty()
         progress_text.text("🧠 Requesting reasoning from AI...")
         
-        # Handle o1 models differently (no system messages, no temperature)
-        if model.startswith("o1-"):
-            # o1 models don't support system messages - combine into user message
-            full_prompt = "You are an expert at explaining mentorship compatibility. Return only valid JSON.\n\n" + prompt
-            response = client.chat.completions.create(
-                model=model,
-                messages=[
-                    {"role": "user", "content": full_prompt}
-                ],
-                max_tokens=8000
-            )
+        # Check if Responses API is available
+        if hasattr(client, 'responses'):
+            responses_api = client.responses
+        elif hasattr(client, 'beta') and hasattr(client.beta, 'responses'):
+            responses_api = client.beta.responses
         else:
-            # Standard models
-            response = client.chat.completions.create(
-                model=model,
-                messages=[
-                    {"role": "system", "content": "You are an expert at explaining mentorship compatibility. Return only valid JSON."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.3,
-                max_tokens=8000
-            )
+            # Fallback to Chat Completions API
+            responses_api = None
+        
+        # Handle o1/o3 models differently (no system messages, no temperature)
+        is_reasoning_model = model.startswith("o1-") or model.startswith("o3-")
+        
+        if responses_api:
+            # Use Responses API with structured output for reasoning
+            # Define schema for reasoning - must be object at root level
+            reasoning_schema = {
+                "format": {
+                    "type": "json_schema",
+                    "name": "mentorship_reasoning",
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "reasonings": {
+                                "type": "array",
+                                "description": "Array of reasoning for each assignment",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "mentee_id": {
+                                            "type": "string",
+                                            "description": "The mentee's ID"
+                                        },
+                                        "mentor_id": {
+                                            "type": "string",
+                                            "description": "The mentor's ID"
+                                        },
+                                        "reasoning": {
+                                            "type": "string",
+                                            "description": "Explanation of why this is a good match"
+                                        }
+                                    },
+                                    "required": ["mentee_id", "mentor_id", "reasoning"],
+                                    "additionalProperties": False
+                                }
+                            }
+                        },
+                        "required": ["reasonings"],
+                        "additionalProperties": False
+                    },
+                    "strict": True
+                }
+            }
+            
+            # Retry logic for rate limits in reasoning call - ONLY for the API call
+            max_retries = 5
+            retry_count = 0
+            response = None
+            
+            while retry_count < max_retries:
+                try:
+                    if is_reasoning_model:
+                        # Reasoning models - combine system instruction into user message
+                        full_prompt = "You are an expert at explaining mentorship compatibility. Return only valid JSON.\n\n" + prompt
+                        response = responses_api.create(
+                            model=model,
+                            input=full_prompt,
+                            max_output_tokens=8000,
+                            store=False,
+                            text=reasoning_schema
+                        )
+                    else:
+                        # Standard models
+                        response = responses_api.create(
+                            model=model,
+                            input=[
+                                {"role": "system", "content": "You are an expert at explaining mentorship compatibility. Return only valid JSON."},
+                                {"role": "user", "content": prompt}
+                            ],
+                            temperature=0.3,
+                            max_output_tokens=8000,
+                            store=False,
+                            text=reasoning_schema
+                        )
+                    # API call succeeded, break out
+                    break
+                    
+                except Exception as e:
+                    error_str = str(e)
+                    
+                    # Check if it's a rate limit error (429)
+                    if "rate_limit_exceeded" in error_str or "429" in error_str:
+                        retry_count += 1
+                        
+                        if retry_count >= max_retries:
+                            st.error(f"❌ Rate limit exceeded on reasoning call after {max_retries} retries")
+                            return {}
+                        
+                        # Extract wait time from error message
+                        import re
+                        wait_match = re.search(r'try again in ([\d.]+)s', error_str)
+                        if wait_match:
+                            wait_time = float(wait_match.group(1))
+                        else:
+                            wait_time = 2 ** retry_count
+                        
+                        buffer = 3
+                        total_wait = wait_time + buffer
+                        
+                        st.warning(f"⏳ Rate limit on reasoning call. Waiting {total_wait:.1f}s before retry {retry_count+1}/{max_retries}...")
+                        time.sleep(total_wait)
+                        continue  # Retry
+                    else:
+                        # Not a rate limit error, fail immediately
+                        st.error(f"❌ Reasoning API call failed: {str(e)}")
+                        return {}
+            
+            # Check if we got a response
+            if response is None:
+                st.error("❌ Failed to get reasoning response after retries")
+                return {}
+        else:
+            # Fallback to Chat Completions API
+            token_limit_param = "max_completion_tokens" if is_reasoning_model else "max_tokens"
+            
+            if is_reasoning_model:
+                full_prompt = "You are an expert at explaining mentorship compatibility. Return only valid JSON.\n\n" + prompt
+                response = client.chat.completions.create(
+                    model=model,
+                    messages=[{"role": "user", "content": full_prompt}],
+                    **{token_limit_param: 8000}
+                )
+            else:
+                response = client.chat.completions.create(
+                    model=model,
+                    messages=[
+                        {"role": "system", "content": "You are an expert at explaining mentorship compatibility. Return only valid JSON."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=0.3,
+                    **{token_limit_param: 8000}
+                )
         
         progress_text.text("🧠 Parsing reasoning response...")
         
-        # Parse response
-        response_text = response.choices[0].message.content.strip()
+        # Parse response (handle both API formats)
+        if hasattr(response, 'output'):
+            # Responses API format: output[0].content[0].text
+            try:
+                if isinstance(response.output, list) and len(response.output) > 0:
+                    output_msg = response.output[0]
+                    if hasattr(output_msg, 'content') and isinstance(output_msg.content, list) and len(output_msg.content) > 0:
+                        response_text = output_msg.content[0].text.strip()
+                    else:
+                        response_text = str(output_msg).strip()
+                else:
+                    response_text = str(response.output).strip()
+            except Exception as e:
+                st.error(f"❌ Error extracting reasoning response: {e}")
+                response_text = str(response.output).strip()
+        elif hasattr(response, 'choices'):
+            # Chat Completions format
+            response_text = response.choices[0].message.content.strip()
+        else:
+            st.error("❌ Unknown response format for reasoning")
+            return {}
         
         # Debug: show what we got
         st.info(f"📝 Received reasoning response ({len(response_text)} characters)")
@@ -1789,18 +1731,28 @@ No markdown, no extra text, just the JSON array."""
         
         # Parse JSON
         try:
-            reasoning_data = json.loads(response_text)
+            reasoning_response = json.loads(response_text)
         except json.JSONDecodeError as parse_error:
             st.error(f"❌ JSON parse failed: {parse_error}")
             with st.expander("📄 Full response text"):
                 st.code(original_text)
             raise
         
-        if not isinstance(reasoning_data, list):
-            st.error(f"❌ Response is {type(reasoning_data).__name__}, expected list")
+        # Extract the reasonings array from the object
+        if isinstance(reasoning_response, dict) and 'reasonings' in reasoning_response:
+            reasoning_data = reasoning_response['reasonings']
+        elif isinstance(reasoning_response, list):
+            # Fallback: if it's already a list (old format)
+            reasoning_data = reasoning_response
+        else:
+            st.error(f"❌ Response is {type(reasoning_response).__name__}, expected object with 'reasonings' array")
             with st.expander("📄 Parsed data"):
-                st.json(reasoning_data)
-            raise ValueError("Response should be a list of reasoning objects")
+                st.json(reasoning_response)
+            raise ValueError("Response should be an object with 'reasonings' array")
+        
+        if not isinstance(reasoning_data, list):
+            st.error(f"❌ 'reasonings' is {type(reasoning_data).__name__}, expected list")
+            raise ValueError("'reasonings' should be a list")
         
         st.info(f"✅ Parsed {len(reasoning_data)} reasoning entries from JSON")
         
@@ -2105,7 +2057,7 @@ def main():
     st.markdown("""
     <div class="main-header">
         <h1>🤝 Mentorship Matching System</h1>
-        <p>AI-powered mentor-mentee matching with optimized token usage</p>
+        <p>AI-powered mentor-mentee matching</p>
     </div>
     """, unsafe_allow_html=True)
     
@@ -2135,7 +2087,7 @@ def main():
     if 'mentee_search' not in st.session_state:
         st.session_state.mentee_search = ""
     if 'model_choice' not in st.session_state:
-        st.session_state.model_choice = "gpt-4o-mini"
+        st.session_state.model_choice = "gpt-5.1"  # Default to latest model
     if 'reset_counter' not in st.session_state:
         st.session_state.reset_counter = 0
     if 'imfahe_specialty' not in st.session_state:
@@ -2175,150 +2127,131 @@ def main():
     
     # TAB 1: Configure Settings
     with tab1:
-        st.header("⚙️ Step 1: Configure OpenAI API")
+        st.header("⚙️ Configure Settings")
         
-        st.markdown("""
-        <div class="info-card">
-            Start by entering your OpenAI API key. This is required before uploading any files.
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # API Key input
-        st.subheader("🔑 OpenAI API Key")
-        api_key_input = st.text_input(
-            "Enter your OpenAI API Key",
-            value=st.session_state.api_key,
-            type="password",
-            help="Your OpenAI API key is required to generate matches. Get one at https://platform.openai.com/api-keys"
-        )
-        
-        if api_key_input != st.session_state.api_key:
-            st.session_state.api_key = api_key_input
-        
-        if api_key_input:
-            st.markdown("""
+        # Check API key from environment
+        if st.session_state.api_key:
+            st.markdown(f"""
             <div class="success-card">
-                ✅ API key configured
+                ✅ OpenAI API key loaded from environment variable <code>OPENAI_API_KEY</code>
             </div>
             """, unsafe_allow_html=True)
         else:
             st.markdown("""
-            <div class="token-warning">
-                ⚠️ Please enter your API key to continue
+            <div class="conflict-warning">
+                ⚠️ <strong>Missing API Key</strong><br>
+                Please set the <code>OPENAI_API_KEY</code> environment variable.<br>
+                Get your key at <a href="https://platform.openai.com/api-keys" target="_blank">https://platform.openai.com/api-keys</a>
             </div>
             """, unsafe_allow_html=True)
+            st.stop()
         
         st.divider()
         
-        # IMFAHE Specialty Selection
-        st.subheader("🎓 IMFAHE Program Specialty")
+        # Model Selection (dynamic from API)
+        st.subheader("🤖 AI Model Selection")
         
-        st.markdown("""
-        <div class="info-card">
-            Select the IMFAHE International Mentor Program area you're coordinating.<br>
-            This helps the AI understand the domain context for better matching.
-        </div>
-        """, unsafe_allow_html=True)
+        # Fetch available models from OpenAI
+        with st.spinner("Fetching available models from OpenAI..."):
+            available_models = fetch_available_models(st.session_state.api_key)
         
-        specialty_options = [
-            "IMP-Biomedicine (Biology, Medicine, Pharmacy, Biotechnology or related areas)",
-            "IMP-Engineering (Engineering, Physics, Computing, Architecture or related areas)",
-            "IMP-Business (Finance, Entrepreneurship, Economics, Operations, Marketing or related areas)",
-            "IMP-Behavioral Sciences (Psychology, Sociology, Education or related areas)"
-        ]
-        
-        selected_specialty = st.selectbox(
-            "Choose your program specialty",
-            specialty_options,
-            index=specialty_options.index(st.session_state.imfahe_specialty) if st.session_state.imfahe_specialty in specialty_options else 0,
-            help="Select the specialty area for your mentor-mentee matching program"
-        )
-        
-        if selected_specialty != st.session_state.imfahe_specialty:
-            st.session_state.imfahe_specialty = selected_specialty
-        
-        # Show specialty-specific guidance
-        specialty_short = selected_specialty.split("(")[0].strip()
-        st.markdown(f"""
-        <div class="success-card">
-            ✅ Specialty selected: <strong>{specialty_short}</strong><br>
-            The AI will prioritize domain-specific specialization alignment for this field.
-        </div>
-        """, unsafe_allow_html=True)
-        
-        st.divider()
-        
-        # Configuration Presets
-        st.subheader("🎯 Matching Configuration Presets")
-        presets = get_prompt_presets()
-        
-        col1, col2 = st.columns([2, 1])
-        
-        with col1:
-            selected_preset = st.selectbox(
-                "Choose a configuration preset",
-                list(presets.keys()),
-                index=list(presets.keys()).index(st.session_state.selected_preset) if st.session_state.selected_preset in presets else 1,
-                help="Select a preset based on your needs for speed vs quality"
+        if available_models:
+            # Sort models by creation date (newest first)
+            sorted_model_ids = sorted(
+                available_models.keys(),
+                key=lambda x: available_models[x].get("created", 0),
+                reverse=True  # Newest first
             )
             
-            if selected_preset != st.session_state.selected_preset:
-                st.session_state.selected_preset = selected_preset
-        
-        with col2:
-            preset_config = presets[selected_preset]
-            st.metric("Model", preset_config["model"])
-            st.metric("Batch Size", preset_config["batch_size"])
-        
-        # Show preset description
-        if "Recommended" in preset_config["description"]:
-            st.markdown(f"""
-            <div class="info-card">
-                ⭐ <strong>{selected_preset}</strong><br>
-                {preset_config["description"]}
-            </div>
-            """, unsafe_allow_html=True)
+            # Ensure current model_choice is valid, otherwise use first model
+            if st.session_state.model_choice not in sorted_model_ids:
+                st.session_state.model_choice = sorted_model_ids[0]
+            
+            # Model selector - using key parameter to prevent jumping
+            from datetime import datetime
+            
+            def format_model_name(model_id):
+                """Format model name with creation date"""
+                model_info = available_models[model_id]
+                # Convert Unix timestamp to readable date
+                created_date = datetime.fromtimestamp(model_info.get("created", 0)).strftime("%Y-%m-%d")
+                return f"{model_info['name']} (created: {created_date})"
+            
+            selected_model = st.selectbox(
+                "Choose AI Model (sorted newest → oldest)",
+                sorted_model_ids,
+                index=sorted_model_ids.index(st.session_state.model_choice),
+                format_func=format_model_name,
+                key="model_selector",
+                help="Select the OpenAI model to use for matching. Models are sorted by creation date (newest first)."
+            )
+            
+            # Update session state only if changed
+            if selected_model != st.session_state.model_choice:
+                st.session_state.model_choice = selected_model
+            
+            # Show model details
+            model_info = available_models[selected_model]
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Quality", model_info["quality"])
+            with col2:
+                st.metric("Speed", model_info["speed"])
+            with col3:
+                st.caption("**Cost**")
+                st.caption(model_info["cost"])
         else:
-            st.info(f"**{selected_preset}**: {preset_config['description']}")
+            st.error("Failed to fetch models. Using default: gpt-5.1")
+            st.session_state.model_choice = "gpt-5.1"
         
         st.divider()
         
-        # Advanced settings
-        with st.expander("⚙️ Advanced Settings (Optional)"):
-            st.write("Override preset settings if needed:")
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                model_choice_override = st.selectbox(
-                    "AI Model",
-                    [
-                        "gpt-4o-mini",
-                        "gpt-4o",
-                        "o1-mini",
-                        "o1-preview",
-                        "gpt-3.5-turbo"
-                    ],
-                    index=["gpt-4o-mini", "gpt-4o", "o1-mini", "o1-preview", "gpt-3.5-turbo"].index(preset_config["model"]),
-                    help="Choose the AI model for matching",
-                    key="model_override"
-                )
-                st.session_state.model_choice = model_choice_override
-            
-            with col2:
-                batch_size = st.slider(
-                    "Batch Size",
-                    min_value=5,
-                    max_value=30,
-                    value=preset_config["batch_size"],
-                    help="Number of mentors to process per batch"
-                )
-                st.session_state.batch_size = batch_size
+        # Batch Size
+        st.subheader("📦 Batch Processing")
+        batch_size = st.slider(
+            "Number of mentors to process per API call",
+            min_value=5,
+            max_value=30,
+            value=st.session_state.batch_size,
+            help="Larger batches = faster processing but higher cost per call. Smaller batches = more granular but more API calls."
+        )
+        st.session_state.batch_size = batch_size
+        
+        st.divider()
+        
+        # Stateful mode toggle
+        st.subheader("🔗 Stateful Batch Processing (Responses API)")
+        use_stateful = st.checkbox(
+            "Enable stateful mode (store=True)",
+            value=st.session_state.get('use_stateful_mode', False),
+            help="Stateful mode uses context chaining to dramatically reduce token usage in batch processing"
+        )
+        st.session_state.use_stateful_mode = use_stateful
+        
+        if use_stateful:
+            st.markdown("""
+            <div class="success-card">
+                <strong>✅ Stateful Mode Enabled</strong><br>
+                <strong>How it works:</strong><br>
+                • First batch: Full mentee data + first mentor batch (normal token count)<br>
+                • Subsequent batches: Only new mentors (~90% token savings)<br>
+                • Context preserved via <code>previous_response_id</code> chaining<br><br>
+                <strong>Benefits:</strong><br>
+                • Massive token savings (est. 70-90% reduction for large datasets)<br>
+                • Lower API costs for multi-batch operations<br>
+                • Faster processing with smaller prompts<br><br>
+                <strong>Requirements:</strong><br>
+                • Responses API must be available (test with test_responses_api.py)<br>
+                • All batches must use the same model and settings
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.info("💡 **Tip:** Enable stateful mode to save ~70-90% on tokens for large datasets with multiple batches")
         
         # Info box
         st.markdown("""
         <div class="info-card">
-            💡 After configuring your API key, proceed to Tab 2 to manage training files
+            💡 Configuration complete. Proceed to Tab 2 to manage training files (optional), or Tab 3 to upload data files.
         </div>
         """, unsafe_allow_html=True)
     
@@ -2445,7 +2378,7 @@ def main():
                     with col1:
                         st.write(f"**{len(selected_files)} file(s) selected**")
                     with col2:
-                        if st.button("✅ Use Selected Files", type="primary", width='stretch'):
+                        if st.button("📥 Click here to load selected files", type="primary", width='stretch'):
                             # Just store the file IDs and basic info
                             selected_ids = [f['id'] for f in selected_files]
                             selected_names = [f['filename'] for f in selected_files]
@@ -2574,7 +2507,7 @@ def main():
                 "Upload mentees Excel file",
                 type=['xlsx'],
                 key=f"mentee_upload_{st.session_state.reset_counter}",
-                help="Excel file containing mentee information. Must have 'Code Mentee' column."
+                help=f"Excel file containing mentee information. Must have '{MENTEE_COLUMNS['id']}' column."
             )
             
         if mentee_file:
@@ -2601,6 +2534,28 @@ def main():
                     </div>
                     """, unsafe_allow_html=True)
                     
+                    # Show data quality guide if not 100%
+                    if completeness < 100:
+                        with st.expander("ℹ️ Data Quality Explanation"):
+                            total_cells = df.shape[0] * df.shape[1]
+                            empty_cells = df.isna().sum().sum()
+                            st.markdown(f"""
+                            **How data quality is calculated:**
+                            - Total cells: {total_cells:,} ({df.shape[0]} rows × {df.shape[1]} columns)
+                            - Filled cells: {total_cells - empty_cells:,}
+                            - Empty cells: {empty_cells:,}
+                            - Quality: {completeness:.1f}% = (Filled / Total) × 100
+                            
+                            **Possible reasons for < 100%:**
+                            - Optional fields left blank (e.g., "Mentee other relevant info")
+                            - Missing data in survey responses
+                            - Partial form submissions
+                            - Fields not applicable to all mentees
+                            
+                            **Is this okay?** Yes! As long as required fields (ID, field, specialization) are filled, 
+                            the system will work fine. Empty optional fields won't affect matching quality.
+                            """)
+                    
                     if warnings:
                         for warning in warnings:
                             st.markdown(f"""
@@ -2623,7 +2578,7 @@ def main():
                 "Upload mentors Excel file",
                 type=['xlsx'],
                 key=f"mentor_upload_{st.session_state.reset_counter}",
-                help="Excel file containing mentor information. Must have 'Code mentor' column."
+                help=f"Excel file containing mentor information. Must have '{MENTOR_COLUMNS['id']}' column."
             )
             
         if mentor_file:
@@ -2650,6 +2605,29 @@ def main():
                     </div>
                     """, unsafe_allow_html=True)
                     
+                    # Show data quality guide if not 100%
+                    if completeness < 100:
+                        with st.expander("ℹ️ Data Quality Explanation"):
+                            total_cells = df.shape[0] * df.shape[1]
+                            empty_cells = df.isna().sum().sum()
+                            st.markdown(f"""
+                            **How data quality is calculated:**
+                            - Total cells: {total_cells:,} ({df.shape[0]} rows × {df.shape[1]} columns)
+                            - Filled cells: {total_cells - empty_cells:,}
+                            - Empty cells: {empty_cells:,}
+                            - Quality: {completeness:.1f}% = (Filled / Total) × 100
+                            
+                            **Possible reasons for < 100%:**
+                            - Optional fields left blank (e.g., "Mentor current position", "Alma Mater")
+                            - Missing data in survey responses
+                            - Partial form submissions
+                            - Fields not applicable to all mentors
+                            - Missing years of experience (1 mentor in your data)
+                            
+                            **Is this okay?** Yes! As long as required fields (ID, field, specialization) are filled, 
+                            the system will work fine. Empty optional fields won't affect matching quality significantly.
+                            """)
+                    
                     if warnings:
                         for warning in warnings:
                             st.markdown(f"""
@@ -2667,17 +2645,6 @@ def main():
                 """, unsafe_allow_html=True)
         
         st.divider()
-        
-        # Quick actions
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            if st.button("🧪 Load Sample Data", width='stretch'):
-                sample_mentees, sample_mentors = generate_sample_data()
-                st.session_state.mentees_df = sample_mentees
-                st.session_state.mentors_df = sample_mentors
-                st.success("✅ Sample data loaded!")
-                st.rerun()
-
     
     # TAB 4: Customize Prompt
     with tab4:
@@ -2685,49 +2652,32 @@ def main():
         
         st.markdown("""
         <div class="info-card">
-            Optionally customize how the AI evaluates mentee-mentor compatibility. The default prompt works well for most cases.
+            Customize the scoring criteria, field compatibility matrix, and calibration examples. 
+            The default prompt works well for most cases.
         </div>
         """, unsafe_allow_html=True)
         
-        # Character counter
         custom_prompt = st.text_area(
-            "Matching Prompt",
+            "Matching Rules and Scoring Rubric",
             value=st.session_state.custom_prompt,
-            height=400,
-            help="Modify how the AI evaluates compatibility"
+            height=500,
+            help="Modify scoring criteria, field relationships, and calibration examples"
         )
         
         # Show character and token count
         char_count = len(custom_prompt)
         token_count = estimate_tokens(custom_prompt)
         
-        col_info1, col_info2, col_info3 = st.columns(3)
+        col_info1, col_info2 = st.columns(2)
         with col_info1:
             st.metric("Characters", f"{char_count:,}")
         with col_info2:
             st.metric("Est. Tokens", f"{token_count:,}")
-        with col_info3:
-            st.metric("Lines", custom_prompt.count('\n') + 1)
         
-        # Update session state whenever the text area changes
+        # Update session state
         st.session_state.custom_prompt = custom_prompt
         
-        st.divider()
-        
-        # Prompt tips
-        with st.expander("💡 Prompt Customization Tips"):
-            st.markdown("""
-            **Tips for customizing the prompt:**
-            - Adjust the percentage weights for different criteria
-            - Add specific domain expertise requirements
-            - Include language or timezone preferences
-            - Specify industry-specific matching factors
-            
-            **Example customizations:**
-            - Increase "Field of expertise" weight to 40% for technical roles
-            - Add "Time zone overlap" as a 10% factor for remote mentoring
-            - Emphasize "Publications" for academic mentorship programs
-            """)
+        st.caption("💡 **Tip:** You can adjust scoring weights, modify field relationships, or add domain-specific criteria.")
     
     # TAB 5: Data Overview
     with tab5:
@@ -2754,46 +2704,24 @@ def main():
             """, unsafe_allow_html=True)
             st.stop()
         
-        # Better metrics display
-        col1, col2, col3 = st.columns(3)
+        # Simplified data summary - mentees and mentors only
+        col1, col2 = st.columns(2)
         
         with col1:
-            # Count training files from IDs (preferred) or DataFrames (legacy)
-            training_count = len(st.session_state.training_file_ids) if st.session_state.training_file_ids else len(st.session_state.training_files) if st.session_state.training_files else 0
-            
-            # Show different subtitle based on source
-            if st.session_state.training_file_ids:
-                subtitle = '<small>From OpenAI storage</small>'
-            elif st.session_state.training_files:
-                subtitle = f'<small>{sum(len(df) for df in st.session_state.training_files)} total records</small>'
-            else:
-                subtitle = '<small>No files selected</small>'
-            
+            mentee_count = len(st.session_state.mentees_df) if st.session_state.mentees_df is not None else 0
             st.markdown(f"""
-            <div class="stat-card">
-                <h3 style="color: #667eea; margin: 0;">📚 {training_count}</h3>
-                <p style="margin: 0.5rem 0 0 0; color: #6c757d;">Training Files</p>
-                {subtitle}
+            <div class="stat-card" style="text-align: center; padding: 1rem;">
+                <h2 style="color: #28a745; margin: 0;">👥 {mentee_count}</h2>
+                <p style="margin: 0.5rem 0 0 0; color: #6c757d; font-size: 0.9rem;">Mentees</p>
             </div>
             """, unsafe_allow_html=True)
         
         with col2:
-            mentee_count = len(st.session_state.mentees_df) if st.session_state.mentees_df is not None else 0
-            st.markdown(f"""
-            <div class="stat-card">
-                <h3 style="color: #28a745; margin: 0;">👥 {mentee_count}</h3>
-                <p style="margin: 0.5rem 0 0 0; color: #6c757d;">Mentees</p>
-                {f'<small>{len(st.session_state.mentees_df.columns)} columns</small>' if st.session_state.mentees_df is not None else ''}
-            </div>
-            """, unsafe_allow_html=True)
-        
-        with col3:
             mentor_count = len(st.session_state.mentors_df) if st.session_state.mentors_df is not None else 0
             st.markdown(f"""
-            <div class="stat-card">
-                <h3 style="color: #17a2b8; margin: 0;">👨‍🏫 {mentor_count}</h3>
-                <p style="margin: 0.5rem 0 0 0; color: #6c757d;">Mentors</p>
-                {f'<small>{len(st.session_state.mentors_df.columns)} columns</small>' if st.session_state.mentors_df is not None else ''}
+            <div class="stat-card" style="text-align: center; padding: 1rem;">
+                <h2 style="color: #17a2b8; margin: 0;">👨‍🏫 {mentor_count}</h2>
+                <p style="margin: 0.5rem 0 0 0; color: #6c757d; font-size: 0.9rem;">Mentors</p>
             </div>
             """, unsafe_allow_html=True)
         
@@ -2821,14 +2749,28 @@ def main():
                 st.caption(f"Showing first 5 rows of each training file • {len(st.session_state.training_files)} file(s) total")
         
         if st.session_state.mentees_df is not None:
-            with st.expander("👥 Preview Mentees Data", expanded=False):
-                st.dataframe(st.session_state.mentees_df.head(10), width='stretch')
-                st.caption(f"Showing 10 of {len(st.session_state.mentees_df)} rows • {len(st.session_state.mentees_df.columns)} columns")
+            with st.expander("👥 Preview Mentees Data", expanded=True):
+                # Show first 5 rows
+                st.dataframe(st.session_state.mentees_df.head(5), width='stretch')
+                
+                # Button to show full table
+                if st.button("📋 Show Full Mentees Table", key="show_full_mentees"):
+                    st.dataframe(st.session_state.mentees_df, width='stretch')
+                    st.caption(f"Showing all {len(st.session_state.mentees_df)} rows • {len(st.session_state.mentees_df.columns)} columns")
+                else:
+                    st.caption(f"Showing first 5 of {len(st.session_state.mentees_df)} rows • {len(st.session_state.mentees_df.columns)} columns")
         
         if st.session_state.mentors_df is not None:
-            with st.expander("👨‍🏫 Preview Mentors Data", expanded=False):
-                st.dataframe(st.session_state.mentors_df.head(10), width='stretch')
-                st.caption(f"Showing 10 of {len(st.session_state.mentors_df)} rows • {len(st.session_state.mentors_df.columns)} columns")
+            with st.expander("👨‍🏫 Preview Mentors Data", expanded=True):
+                # Show first 5 rows
+                st.dataframe(st.session_state.mentors_df.head(5), width='stretch')
+                
+                # Button to show full table
+                if st.button("📋 Show Full Mentors Table", key="show_full_mentors"):
+                    st.dataframe(st.session_state.mentors_df, width='stretch')
+                    st.caption(f"Showing all {len(st.session_state.mentors_df)} rows • {len(st.session_state.mentors_df.columns)} columns")
+                else:
+                    st.caption(f"Showing first 5 of {len(st.session_state.mentors_df)} rows • {len(st.session_state.mentors_df.columns)} columns")
         
         st.markdown("""
         <div class="success-card">
@@ -2904,7 +2846,7 @@ def main():
             validation_passed = True
             
             # Check mentees for duplicates
-            mentee_ids = st.session_state.mentees_df['Code Mentee'].dropna()
+            mentee_ids = st.session_state.mentees_df[MENTEE_COLUMNS['id']].dropna()
             mentee_duplicates = mentee_ids[mentee_ids.duplicated(keep=False)]
             if len(mentee_duplicates) > 0:
                 validation_passed = False
@@ -2917,7 +2859,7 @@ def main():
                 st.error("⚠️ This will cause the AI to return wrong results. Please fix your data and reload.")
             
             # Check mentors for duplicates
-            mentor_ids = st.session_state.mentors_df['Code mentor'].dropna()
+            mentor_ids = st.session_state.mentors_df[MENTOR_COLUMNS['id']].dropna()
             mentor_duplicates = mentor_ids[mentor_ids.duplicated(keep=False)]
             if len(mentor_duplicates) > 0:
                 validation_passed = False
@@ -2960,13 +2902,17 @@ def main():
                 </div>
                 """, unsafe_allow_html=True)
                 
+                # Get stateful mode setting
+                use_stateful = st.session_state.get('use_stateful_mode', False)
+                
                 matrix_df = generate_matrix_in_batches(
                         st.session_state.mentees_df,
                         st.session_state.mentors_df,
                         st.session_state.training_files,
                         api_key,
                     model_choice,
-                    batch_size=st.session_state.batch_size
+                    batch_size=st.session_state.batch_size,
+                    use_stateful=use_stateful
                 )
                 
                 if matrix_df is not None:
@@ -3078,6 +3024,18 @@ def main():
                         
                         st.session_state.matches = matches
                         st.success(f"✅ Complete! {len(matches)} mentees optimally matched with guaranteed constraints!")
+                        
+                        # Validate match quality (Phase 1 improvement)
+                        flagged_matches, score_stats = validate_and_flag_matches(
+                            st.session_state.matches,
+                            st.session_state.mentees_df,
+                            st.session_state.mentors_df
+                        )
+                        
+                        # Store validation results for reference
+                        st.session_state.flagged_matches = flagged_matches
+                        st.session_state.score_stats = score_stats
+                        
                         st.balloons()
         else:
             # Show what's missing (only if something is actually missing)
@@ -3130,9 +3088,18 @@ def main():
                 </div>
                 """, unsafe_allow_html=True)
             
-            # Show heatmap
+            # Show score distribution analysis (Task 6)
             if st.session_state.matrix_df is not None:
                 st.divider()
+                
+                # Analyze score distribution to detect AI generosity issues
+                score_distribution = analyze_score_distribution(st.session_state.matrix_df)
+                st.session_state.score_distribution = score_distribution
+                
+                st.divider()
+                
+            # Show heatmap
+            if st.session_state.matrix_df is not None:
                 st.subheader("🔥 Compatibility Heatmap")
                 st.caption("Blue boxes show optimal assignments selected by Hungarian algorithm")
                 
