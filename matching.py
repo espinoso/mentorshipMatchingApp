@@ -304,8 +304,16 @@ def hungarian_assignment(matrix_df, max_mentees_per_mentor=2):
     return assignments
 
 
-def check_mentor_conflicts(matches):
-    """Check if any mentor is assigned to more than 2 mentees at rank 1"""
+def check_mentor_conflicts(matches, max_mentees_per_mentor=2):
+    """Check if any mentor is assigned to more than max_mentees_per_mentor mentees at rank 1
+    
+    Args:
+        matches: List of match data dictionaries
+        max_mentees_per_mentor: Maximum number of mentees per mentor (default 2)
+    
+    Returns:
+        List of conflict dictionaries
+    """
     if not matches:
         return []
     
@@ -324,7 +332,7 @@ def check_mentor_conflicts(matches):
                 mentor_assignments[mentor_id].append((mentee_id, percentage))
     
     for mentor_id, assignments in mentor_assignments.items():
-        if len(assignments) > 2:
+        if len(assignments) > max_mentees_per_mentor:
             conflicts.append({
                 'mentor_id': mentor_id,
                 'assignments': assignments,

@@ -174,7 +174,6 @@ def render_processing_tab():
             matrix_df = generate_matrix_in_batches(
                 st.session_state.mentees_df,
                 st.session_state.mentors_df,
-                st.session_state.training_files,
                 api_key,
                 model_choice,
                 batch_size=batch_size,  # None = auto-calculate
@@ -203,7 +202,9 @@ def render_processing_tab():
                 else:
                     st.info("🧮 Finding optimal assignments...")
                 
-                assignments = hungarian_assignment(matrix_df, max_mentees_per_mentor=2)
+                # Get max_mentees_per_mentor from session state (default to 2 for backward compatibility)
+                max_mentees_per_mentor = st.session_state.get('max_mentees_per_mentor', 2)
+                assignments = hungarian_assignment(matrix_df, max_mentees_per_mentor=max_mentees_per_mentor)
                 st.session_state.assignments = assignments
                 
                 # Calculate statistics
@@ -373,7 +374,8 @@ def render_processing_tab():
             )
         
         # Check for conflicts
-        conflicts = check_mentor_conflicts(st.session_state.matches)
+        max_mentees_per_mentor = st.session_state.get('max_mentees_per_mentor', 2)
+        conflicts = check_mentor_conflicts(st.session_state.matches, max_mentees_per_mentor=max_mentees_per_mentor)
         
         if conflicts:
             if is_debug_mode():
@@ -385,7 +387,7 @@ def render_processing_tab():
             else:
                 st.warning("⚠️ Some conflicts detected. Please review.")
         else:
-            st.success("✅ All constraints satisfied: No mentor has >2 mentees!")
+            st.success(f"✅ All constraints satisfied: No mentor has >{max_mentees_per_mentor} mentee(s)!")
         
         # Results display
         st.divider()

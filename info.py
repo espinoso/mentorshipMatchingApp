@@ -273,8 +273,9 @@ FIELD COMPATIBILITY MATRIX (AUTHORITATIVE - USE THIS EXACTLY)
    This covers ALL exact matches, including fields not explicitly listed below.
 
 40 POINTS - IDENTICAL FIELDS (explicit list + wildcard above):
+
+=== CORE BROAD CATEGORIES ===
 • Accounting = Accounting
-• Agricultural Sciences = Agricultural Sciences
 • Architecture = Architecture
 • Behavioral Science = Behavioral Science
 • Bioengineering = Bioengineering
@@ -310,57 +311,67 @@ FIELD COMPATIBILITY MATRIX (AUTHORITATIVE - USE THIS EXACTLY)
 • Sociology = Sociology
 • Sports Science = Sports Science
 • Telecommunications Engineering = Telecommunications Engineering
+
+=== LIFE SCIENCES - MOLECULAR & CELLULAR ===
 • Advanced Chemistry = Advanced Chemistry
-• Agrifood and Biosystems Science and Engineering = Agrifood and Biosystems Science and Engineering
 • Analytical Chemistry = Analytical Chemistry
 • Biochemistry = Biochemistry
 • Biochemistry and Molecular Biology = Biochemistry and Molecular Biology
 • Biodiversity = Biodiversity
-• Bioengineering = Bioengineering
 • Bioinformatics = Bioinformatics
 • Biology = Biology
-• Biomedical Engineering = Biomedical Engineering
-• Biomedical Sciences = Biomedical Sciences
-• Biomedicine = Biomedicine
-• Biomedicine and Biotechnology = Biomedicine and Biotechnology
 • Biophysics = Biophysics
-• Biotechnology = Biotechnology
-• Cancer Research = Cancer Research
 • Cell Biology = Cell Biology
-• Chemistry = Chemistry
-• Clinical Psychology = Clinical Psychology
 • Computational Biology = Computational Biology
 • Data Science = Data Science
-• Drug Discovery = Drug Discovery
 • Ecology = Ecology
-• Environmental Engineering = Environmental Engineering
 • Environmental Sciences = Environmental Sciences
-• Epidemiology = Epidemiology
 • Genetics = Genetics
 • Genomics = Genomics
-• Health Sciences = Health Sciences
+• Molecular Biology = Molecular Biology
+• Molecular Life Sciences = Molecular Life Sciences
+
+=== LIFE SCIENCES - BIOMEDICAL & MEDICAL ===
+• Biomedical Sciences = Biomedical Sciences
+• Biomedicine and Biotechnology = Biomedicine and Biotechnology
+• Cancer Research = Cancer Research
+• Clinical Psychology = Clinical Psychology
+• Drug Discovery = Drug Discovery
+• Epidemiology = Epidemiology
 • Immunology = Immunology
 • Material Science = Material Science
 • Medical Sciences = Medical Sciences
 • Medical Technology = Medical Technology
 • Medicine = Medicine
 • Microbiology = Microbiology
-• Molecular Biology = Molecular Biology
-• Molecular Life Sciences = Molecular Life Sciences
 • Neuroscience = Neuroscience
 • Neuroscience and Neurosurgery = Neuroscience and Neurosurgery
 • Nutrition and Dietetics = Nutrition and Dietetics
 • Oncology = Oncology
-• Pharmaceutical Sciences = Pharmaceutical Sciences
 • Pharmacology = Pharmacology
 • Pharmacology and Physiology = Pharmacology and Physiology
-• Pharmacy = Pharmacy
 • Pharmacy and Biomedical Sciences = Pharmacy and Biomedical Sciences
 • Physiology = Physiology
 • Psychiatry = Psychiatry
 • Public Health = Public Health
-• Statistical Physics and Complex Systems = Statistical Physics and Complex Systems
 • Translational Medicine = Translational Medicine
+
+=== ENGINEERING SPECIALIZATIONS ===
+• Aeronautics = Aeronautics (maps to Engineering cluster)
+• Applied Linguistics = Applied Linguistics (maps to Linguistics)
+• Biological Engineering = Biological Engineering (maps to Bioengineering)
+• Bioprocess Engineering = Bioprocess Engineering (maps to Engineering cluster)
+• Civil Engineering = Civil Engineering (maps to Engineering cluster)
+• Electronic Engineering = Electronic Engineering (maps to Electrical Engineering)
+• Environmental Engineering = Environmental Engineering
+• Forest Engineering = Forest Engineering (maps to Engineering cluster)
+• Software Engineering = Software Engineering (maps to Computer Science)
+• Telecom Engineering = Telecom Engineering (maps to Telecommunications Engineering)
+
+=== OTHER SPECIALIZED FIELDS ===
+• Agricultural Sciences = Agricultural Sciences
+• Agrifood and Biosystems Science and Engineering = Agrifood and Biosystems Science and Engineering
+• Statistical Physics and Complex Systems = Statistical Physics and Complex Systems
 
 30 POINTS - HIGHLY RELATED (within same cluster, highly overlapping):
 
@@ -420,7 +431,7 @@ CLUSTER F: Chemistry & Materials
 • Chemistry ↔ Advanced Chemistry
 • Chemistry ↔ Material Science
 
-CLUSTER G: Engineering Fields (NEW)
+CLUSTER G: Engineering Fields
 • Engineering ↔ Mechanical Engineering
 • Engineering ↔ Electrical Engineering
 • Mechanical Engineering ↔ Electrical Engineering
@@ -428,26 +439,37 @@ CLUSTER G: Engineering Fields (NEW)
 • Chemical Engineering ↔ Chemistry
 • Energy Engineering ↔ Renewable Energy
 • Energy Engineering ↔ Electrical Engineering
+• Engineering ↔ Civil Engineering
+• Engineering ↔ Electronic Engineering
+• Engineering ↔ Aeronautics
+• Engineering ↔ Bioprocess Engineering
+• Engineering ↔ Forest Engineering
 
-CLUSTER H: Psychology & Behavioral Sciences (NEW)
+CLUSTER H: Psychology & Behavioral Sciences
 • Psychology ↔ Psychological Neuroscience
 • Psychology ↔ Behavioral Science
 • Psychological Neuroscience ↔ Behavioral Science
 • Behavioral Science ↔ Sociology
 
-CLUSTER I: Economics & Business (NEW)
+CLUSTER I: Economics & Business
 • Economics ↔ Economics/Entrepreneurship
 • Economics ↔ Accounting
 • Economics/Entrepreneurship ↔ Accounting
 
-CLUSTER J: Design & Architecture (NEW)
+CLUSTER J: Design & Architecture
 • Architecture ↔ Interior Design
 • Fashion Design ↔ Interior Design
 
-CLUSTER K: Language & Communication (NEW)
+CLUSTER K: Language & Communication
 • Linguistics ↔ Literature Studies
 • Linguistics ↔ Communication Studies
+• Linguistics ↔ Applied Linguistics
 • Literature Studies ↔ Communication Studies
+
+CLUSTER L: Computer Science & Software
+• Computer Science ↔ Software Engineering
+• Computer Science ↔ Data Science
+• Computer Science ↔ Business Informatics
 
 20 POINTS - RELATED (cross-cluster connections, overlapping disciplines):
 
@@ -511,69 +533,72 @@ Cross Data-Biology:
 • Data Science ↔ Computational Biology
 • Data Science ↔ Genomics
 
-Cross Life Sciences-Engineering (NEW):
+Cross Life Sciences-Engineering:
 • Biomedicine ↔ Chemical Engineering
 • Biotechnology ↔ Chemical Engineering
 • Chemistry ↔ Chemical Engineering
 • Pharmaceutical Sciences ↔ Chemical Engineering
 • Biomedical Engineering ↔ Mechanical Engineering
 • Biomedical Engineering ↔ Electrical Engineering
+• Bioengineering ↔ Biological Engineering
+• Bioengineering ↔ Bioprocess Engineering
 
-Cross Life Sciences-Computer Science (NEW):
+Cross Life Sciences-Computer Science:
 • Biomedicine ↔ Computer Science (bioinformatics)
 • Biotechnology ↔ Computer Science (biotech data)
 • Health Sciences ↔ Computer Science (health informatics)
 
-Cross Engineering-Computer Science (NEW):
+Cross Engineering-Computer Science:
 • Engineering ↔ Computer Science (software engineering)
 • Electrical Engineering ↔ Computer Science (hardware-software)
 • Telecommunications Engineering ↔ Computer Science (network engineering)
 • Computer Science ↔ Business Informatics
+• Software Engineering ↔ Computer Science
 
-Cross Engineering-Physics/Math (NEW):
+Cross Engineering-Physics/Math:
 • Engineering ↔ Physics
 • Mechanical Engineering ↔ Physics
 • Electrical Engineering ↔ Physics
 • Engineering ↔ Mathematics
 • Computer Science ↔ Mathematics
 
-Cross Psychology-Health (NEW):
+Cross Psychology-Health:
 • Psychology ↔ Health Sciences (mental health)
 • Psychological Neuroscience ↔ Biomedicine (neuroscience)
 • Behavioral Science ↔ Health Sciences (behavioral health)
 
-Cross Social Sciences-Humanities (NEW):
+Cross Social Sciences-Humanities:
 • Sociology ↔ Psychology
 • Education ↔ Psychology
 • Sociology ↔ Communication Studies
 • Law ↔ Sociology
 • Law ↔ Economics
 
-Cross Business-Technology (NEW):
+Cross Business-Technology:
 • Economics/Entrepreneurship ↔ Business Informatics
 • Economics ↔ Business Informatics
 • Economics/Entrepreneurship ↔ Computer Science (tech entrepreneurship)
 
-Cross Business-Design (NEW):
+Cross Business-Design:
 • Fashion Design ↔ Economics/Entrepreneurship (fashion business)
 • Architecture ↔ Economics/Entrepreneurship (real estate, construction)
 
-Cross Design-Engineering (NEW):
+Cross Design-Engineering:
 • Architecture ↔ Engineering (structural, civil)
 • Architecture ↔ Mechanical Engineering (HVAC, building systems)
 • Interior Design ↔ Architecture
 
-Cross Environmental Sciences (NEW):
+Cross Environmental Sciences:
 • Environmental Science ↔ Agricultural Sciences
 • Environmental Science ↔ Chemistry (environmental chemistry)
 • Agricultural Sciences ↔ Biotechnology (agribiotechnology)
 
-Cross Health-Sports (NEW):
+Cross Health-Sports:
 • Sports Science ↔ Health Sciences
 • Sports Science ↔ Psychology (sports psychology)
 • Sports Science ↔ Biomedicine (sports medicine)
 
-Cross Education Connections (NEW):
+Cross Education Connections:
 • Education ↔ Linguistics (language education)
 • Education ↔ Mathematics (mathematics education)
 • Education ↔ Psychology (educational psychology)
@@ -617,13 +642,13 @@ Examples of COMPLETELY unrelated pairings:
 • Clinical Psychology ↔ Environmental Engineering → 0 POINTS
 • Statistical Physics ↔ Pharmacy → 0 POINTS
 • Material Science ↔ Psychiatry → 0 POINTS
-• Fashion Design ↔ Biomedicine → 0 POINTS (NEW FIELDS)
-• Literature Studies ↔ Engineering → 0 POINTS (NEW FIELDS)
-• Law ↔ Chemistry → 0 POINTS (NEW FIELDS)
-• Sports Science ↔ Linguistics → 0 POINTS (NEW FIELDS)
-• Accounting ↔ Pharmaceutical Sciences → 0 POINTS (NEW FIELDS)
-• Interior Design ↔ Physics → 0 POINTS (NEW FIELDS)
-• Telecommunications Engineering ↔ Psychology → 0 POINTS (NEW FIELDS)
+• Fashion Design ↔ Biomedicine → 0 POINTS
+• Literature Studies ↔ Engineering → 0 POINTS
+• Law ↔ Chemistry → 0 POINTS
+• Sports Science ↔ Linguistics → 0 POINTS
+• Accounting ↔ Pharmaceutical Sciences → 0 POINTS
+• Interior Design ↔ Physics → 0 POINTS
+• Telecommunications Engineering ↔ Psychology → 0 POINTS
 
 ⚠️ ANY PAIRING NOT EXPLICITLY LISTED ABOVE → 0 POINTS
 When in doubt, assign 0 points. Do NOT invent relationships.

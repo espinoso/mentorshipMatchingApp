@@ -178,4 +178,27 @@ def render_config_tab():
             """, unsafe_allow_html=True)
         elif not is_full_model:
             st.info("💡 **Tip:** Enable stateful mode to save ~70-90% on tokens for large datasets with multiple batches")
+    
+    st.divider()
+    
+    # Matching Constraints
+    st.subheader("⚖️ Matching Constraints")
+    
+    # Initialize max_mentees_per_mentor if not set
+    if 'max_mentees_per_mentor' not in st.session_state:
+        st.session_state.max_mentees_per_mentor = 2
+    
+    max_mentees = st.number_input(
+        "Maximum Mentees per Mentor",
+        min_value=1,
+        max_value=3,
+        value=st.session_state.max_mentees_per_mentor,
+        step=1,
+        help="Set the maximum number of mentees that can be assigned to a single mentor. Range: 1-3."
+    )
+    
+    st.session_state.max_mentees_per_mentor = max_mentees
+    
+    if is_debug_mode():
+        st.info(f"ℹ️ Each mentor can be assigned to a maximum of {max_mentees} mentee(s). This constraint is enforced by the Hungarian algorithm during optimal assignment.")
 

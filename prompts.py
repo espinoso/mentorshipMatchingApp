@@ -29,19 +29,12 @@ END your response with: }}
 
 
 
-def create_matrix_prompt(use_file_search=False, include_json_instructions=True):
+def create_matrix_prompt(include_json_instructions=True):
     """Create the prompt for generating compatibility matrix with STRICT SCORING and COMPLETENESS
     
     Args:
-        use_file_search: Whether to include file search instructions
         include_json_instructions: If False, omit JSON format instructions (for models with structured output)
     """
-    
-    file_search_instruction = """
-TRAINING DATA REFERENCE:
-Use the training files to identify patterns of successful matches.
-Pay attention to what makes a "good" vs "poor" match in historical data.
-""" if use_file_search else ""
     
     json_header = JSON_HEADER if include_json_instructions else ""
     
@@ -53,7 +46,6 @@ for international career acceleration through expert guidance.
 Program Coverage: Life Sciences, Engineering, Computer Science, Business, Economics, 
 Social Sciences, Humanities, Design, Environmental Sciences, and all professional fields
 
-{file_search_instruction}
 
 ═══════════════════════════════════════════════════════════════
 ⚠️ CRITICAL REQUIREMENTS - READ FIRST ⚠️
@@ -248,8 +240,6 @@ def get_prompt_for_api(include_json_instructions=True):
         include_json_instructions: If False, omit JSON format instructions (for models with structured output)
     """
     custom_rubric = st.session_state.get('custom_prompt', '')
-    training_file_ids = st.session_state.get('training_file_ids', [])
-    use_file_search = len(training_file_ids) > 0
     
     json_header = JSON_HEADER if include_json_instructions else ""
     json_footer = JSON_FOOTER if include_json_instructions else ""
@@ -260,8 +250,7 @@ def get_prompt_for_api(include_json_instructions=True):
 
 def create_default_prompt():
     """Extract only the EDITABLE rubric section (middle part of the full prompt)"""
-    training_file_ids = st.session_state.get('training_file_ids', [])
-    full_prompt = create_matrix_prompt(use_file_search=len(training_file_ids) > 0)
+    full_prompt = create_matrix_prompt()
     
     start_marker = "You are evaluating mentor-mentee"
     end_marker = "OUTPUT FORMAT - MUST INCLUDE"

@@ -34,9 +34,6 @@ from ui_config import (
     render_config_tab
 )
 
-from ui_training import (
-    render_training_tab
-)
 
 from ui_upload import (
     render_upload_tab
@@ -68,7 +65,7 @@ st.set_page_config(
 st.markdown(CSS_STYLES, unsafe_allow_html=True)
 
 
-def call_openai_api_with_chat_completions(prompt, mentees_df, mentors_df, training_data, api_key, model="gpt-4o-mini", mentor_subset=None, use_stateful=False, previous_response_id=None, is_first_batch=True):
+def call_openai_api_with_chat_completions(prompt, mentees_df, mentors_df, api_key, model="gpt-4o-mini", mentor_subset=None, use_stateful=False, previous_response_id=None, is_first_batch=True):
     """Use OpenAI Responses API - replaces Chat Completions API
     
     Migration to Responses API per:
@@ -96,7 +93,7 @@ def call_openai_api_with_chat_completions(prompt, mentees_df, mentors_df, traini
         else:
             if is_debug_mode():
                 st.warning("⚠️ Responses API not available, falling back to Chat Completions")
-            return call_openai_api_chat_completions_legacy(prompt, mentees_df, mentors_df, training_data, api_key, model, mentor_subset)
+            return call_openai_api_chat_completions_legacy(prompt, mentees_df, mentors_df, api_key, model, mentor_subset)
         
         if is_debug_mode():
             st.info(f"🔄 Using {api_name}...")
@@ -116,7 +113,7 @@ def call_openai_api_with_chat_completions(prompt, mentees_df, mentors_df, traini
             # Stateless mode OR first batch: Send complete context
             if is_debug_mode() and use_stateful:
                 st.info("🔗 Stateful mode: First batch - sending full context")
-            combined_data = prepare_data_for_assistant(mentees_df, mentors_to_use, training_data)
+            combined_data = prepare_data_for_assistant(mentees_df, mentors_to_use)
             full_message = f"{prompt}\n\n{combined_data}\n\nGenerate matches for ALL mentees in JSON format as specified."
         
         # API usage estimates using improved formulas
@@ -167,8 +164,6 @@ def call_openai_api_with_chat_completions(prompt, mentees_df, mentors_df, traini
                 st.error("⚠️ Token limit exceeded. Try reducing batch size or splitting the data.")
             return None
         
-        training_file_ids = st.session_state.get('training_file_ids', [])
-        
         messages = [
             {
                 "role": "system",
@@ -183,8 +178,6 @@ def call_openai_api_with_chat_completions(prompt, mentees_df, mentors_df, traini
         # Suppress these messages - progress UI shows batch status
         if is_debug_mode():
             st.caption("🔄 Sending request to OpenAI Responses API...")
-            if training_file_ids:
-                st.caption(f"📚 Including {len(training_file_ids)} training file(s)...")
         
         start_time = time.time()
         
@@ -213,10 +206,6 @@ def call_openai_api_with_chat_completions(prompt, mentees_df, mentors_df, traini
         
         if model_config.get('supports_top_p', False) and not is_reasoning_model:
             api_params["top_p"] = 0.95
-        
-        # Responses API file_search requires vector_store_ids, not file_ids
-        if is_debug_mode() and training_file_ids:
-            st.warning("⚠️ File search with Responses API requires vector stores. Training data will be included in prompt instead.")
         
         if supports_json_mode and model_config['supports_structured_output']:
             api_params["text"] = {
@@ -474,7 +463,7 @@ def call_openai_api_with_chat_completions(prompt, mentees_df, mentors_df, traini
         st.error(f"❌ Error: {str(e)}")
         show_debug_info()
         return None
-def call_openai_api_chat_completions_legacy(prompt, mentees_df, mentors_df, training_data, api_key, model="gpt-4o-mini", mentor_subset=None):
+def call_openai_api_chat_completions_legacy(prompt, mentees_df, mentors_df, api_key, model="gpt-4o-mini", mentor_subset=None):
     """
     Legacy Chat Completions API implementation (fallback when Responses API not available)
     
@@ -488,11 +477,9 @@ def call_openai_api_chat_completions_legacy(prompt, mentees_df, mentors_df, trai
         else:
             mentors_to_use = mentors_df
         
-        combined_data = prepare_data_for_assistant(mentees_df, mentors_to_use, training_data)
+        combined_data = prepare_data_for_assistant(mentees_df, mentors_to_use)
         
         full_message = f"{prompt}\n\n{combined_data}\n\nGenerate matches for ALL mentees in JSON format as specified."
-        
-        training_file_ids = st.session_state.get('training_file_ids', [])
         
         messages = [
             {
@@ -504,19 +491,6 @@ def call_openai_api_chat_completions_legacy(prompt, mentees_df, mentors_df, trai
                 "content": full_message
             }
         ]
-        
-        if training_file_ids:
-            st.info(f"📚 Including {len(training_file_ids)} training file(s) for context...")
-            try:
-                messages[1]["attachments"] = [
-                    {
-                        "file_id": file_id,
-                        "tools": [{"type": "file_search"}]
-                    }
-                    for file_id in training_file_ids
-                ]
-            except:
-                st.warning("⚠️ Could not attach files with Chat Completions API")
         
         st.info("🔄 Sending request to OpenAI Chat Completions API (Legacy)...")
         
@@ -558,16 +532,16 @@ def call_openai_api_chat_completions_legacy(prompt, mentees_df, mentors_df, trai
 
 
 # Keep old function name as alias for backward compatibility
-def call_openai_api_with_assistants(prompt, mentees_df, mentors_df, training_data, api_key, model="gpt-4o-mini", mentor_subset=None, use_stateful=False, previous_response_id=None, is_first_batch=True):
+def call_openai_api_with_assistants(prompt, mentees_df, mentors_df, api_key, model="gpt-4o-mini", mentor_subset=None, use_stateful=False, previous_response_id=None, is_first_batch=True):
     """
     DEPRECATED: Assistants API will be deprecated in 2025.
     This function now redirects to the Responses API.
     
     See: https://platform.openai.com/docs/guides/migrate-to-responses
     """
-    return call_openai_api_with_chat_completions(prompt, mentees_df, mentors_df, training_data, api_key, model, mentor_subset, use_stateful, previous_response_id, is_first_batch)
+    return call_openai_api_with_chat_completions(prompt, mentees_df, mentors_df, api_key, model, mentor_subset, use_stateful, previous_response_id, is_first_batch)
 
-def generate_matrix_in_batches(mentees_df, mentors_df, training_data, api_key, model, batch_size=None, use_stateful=False):
+def generate_matrix_in_batches(mentees_df, mentors_df, api_key, model, batch_size=None, use_stateful=False):
     """Generate compatibility matrix in batches to avoid token limits
     
     Args:
@@ -681,12 +655,10 @@ def generate_matrix_in_batches(mentees_df, mentors_df, training_data, api_key, m
         model_config = get_model_config(model)
         include_json_instructions = not model_config.get('supports_structured_output', True)
         
-        training_file_ids = st.session_state.get('training_file_ids', [])
         result = call_openai_api_with_assistants(
             get_prompt_for_api(include_json_instructions=include_json_instructions),
             mentees_df,
             mentors_df,
-            training_data,
             api_key,
             model,
             mentor_subset=mentor_batch,
@@ -895,12 +867,10 @@ def generate_matrix_in_batches(mentees_df, mentors_df, training_data, api_key, m
                 model_config = get_model_config(model)
                 include_json_instructions = not model_config.get('supports_structured_output', True)
                 
-                training_file_ids = st.session_state.get('training_file_ids', [])
                 retry_result = call_openai_api_with_assistants(
                     get_prompt_for_api(include_json_instructions=include_json_instructions),
                     mentees_df,
                     mentors_df,
-                    training_data,
                     api_key,
                     model,
                     mentor_subset=list(current_missing),
@@ -1415,8 +1385,6 @@ def main():
     """, unsafe_allow_html=True)
     
     # Initialize session state
-    if 'training_files' not in st.session_state:
-        st.session_state.training_files = []
     if 'mentees_df' not in st.session_state:
         st.session_state.mentees_df = None
     if 'mentors_df' not in st.session_state:
@@ -1433,10 +1401,8 @@ def main():
         st.session_state.selected_preset = "Balanced ⭐"
     if 'batch_size' not in st.session_state:
         st.session_state.batch_size = 15
-    if 'training_file_ids' not in st.session_state:
-        st.session_state.training_file_ids = []
-    if 'training_file_names' not in st.session_state:
-        st.session_state.training_file_names = []
+    if 'max_mentees_per_mentor' not in st.session_state:
+        st.session_state.max_mentees_per_mentor = 2
     if 'mentee_search' not in st.session_state:
         st.session_state.mentee_search = ""
     if 'model_choice' not in st.session_state:
@@ -1456,63 +1422,50 @@ def main():
             # Default: ON if env var not present or invalid
             st.session_state.debug_mode = True
     
-    # No sidebar - cleaner interface
-    
-    # Step 1 (API key) + Step 3 (data files) are required
-    # Step 2 (training files) is optional
-    step1_complete = (
-        st.session_state.mentees_df is not None and 
-        st.session_state.mentors_df is not None
-    )
-    
     import os
     
     # Try to get from session state or environment
     if 'api_key' not in st.session_state:
         st.session_state.api_key = os.getenv('OPENAI_API_KEY', '')
     
-    step2_complete = bool(st.session_state.api_key) and step1_complete
-    step3_complete = step2_complete  # Can view data once files uploaded and settings configured
-    
     tab_names = [
         "1️⃣ Configure Settings",
-        "2️⃣ Training Files",
-        "3️⃣ Upload Data Files",
-        "4️⃣ Customize Prompt",
-        "5️⃣ Data Overview",
-        "6️⃣ Generate Matches",
-        "7️⃣ Processing & Results"
+        "2️⃣ Upload Data Files",
+        "3️⃣ Customize Prompt",
+        "4️⃣ Data Overview",
+        "5️⃣ Generate Matches",
+        "6️⃣ Processing & Results"
     ]
     
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(tab_names)
-    
-    # TAB 1: Configure Settings
-    with tab1:
-        render_config_tab()
-    
-    # TAB 2: Training Files
-    with tab2:
-        render_training_tab()
-    
-    # TAB 3: Upload Data Files
-    with tab3:
-        render_upload_tab()
-    
-    # TAB 4: Customize Prompt
-    with tab4:
-        render_prompt_tab()
-    
-    # TAB 5: Data Overview
-    with tab5:
-        render_overview_tab()
-    
-    # TAB 6: Generate Matches
-    with tab6:
-        render_matches_tab()
-    
-    # TAB 7: Processing & Results
-    with tab7:
-        render_processing_tab()
+    # WORKAROUND: Wrap tabs in columns to fix rendering issue (known Streamlit bug)
+    # This fixes the issue where tabs after position 4 don't render
+    cols = st.columns([0.999, 0.001])
+    with cols[0]:
+        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(tab_names)
+        
+        # TAB 1: Configure Settings
+        with tab1:
+            render_config_tab()
+        
+        # TAB 2: Upload Data Files
+        with tab2:
+            render_upload_tab()
+        
+        # TAB 3: Customize Prompt
+        with tab3:
+            render_prompt_tab()
+        
+        # TAB 4: Data Overview
+        with tab4:
+            render_overview_tab()
+        
+        # TAB 5: Generate Matches
+        with tab5:
+            render_matches_tab()
+        
+        # TAB 6: Processing & Results
+        with tab6:
+            render_processing_tab()
 
 if __name__ == "__main__":
     main()

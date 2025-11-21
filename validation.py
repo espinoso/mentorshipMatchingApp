@@ -231,13 +231,12 @@ def clean_text_for_csv(df):
     return df
 
 
-def prepare_data_for_assistant(mentees_df, mentors_df, training_files):
+def prepare_data_for_assistant(mentees_df, mentors_df):
     """Prepare data with ALL columns for comprehensive matching
     
     Args:
         mentees_df: DataFrame of mentees (None to skip mentees section for stateful subsequent batches)
         mentors_df: DataFrame of mentors
-        training_files: List of training DataFrames
     """
     
     combined_data = "# MENTORSHIP MATCHING DATA\n\n"
@@ -257,13 +256,6 @@ def prepare_data_for_assistant(mentees_df, mentors_df, training_files):
     combined_data += f"Total mentors: {len(mentors_cleaned)}\n"
     combined_data += f"All columns included: {', '.join(mentors_cleaned.columns.tolist())}\n\n"
     combined_data += mentors_cleaned.to_csv(index=False)
-    
-    if training_files and len(training_files) > 0:
-        combined_data += "\n## TRAINING EXAMPLES (First 5 rows for reference)\n"
-        for i, df in enumerate(training_files):
-            df_cleaned = clean_text_for_csv(df.head(5))
-            combined_data += f"\n### Training Set {i+1}\n"
-            combined_data += df_cleaned.to_csv(index=False)
     
     return combined_data
 
