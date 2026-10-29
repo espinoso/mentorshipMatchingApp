@@ -196,20 +196,21 @@ def apply_country_restrictions(
 ) -> tuple[pd.DataFrame, list[dict]]:
     """Zero mentor x mentee cells that share a country; returns (matrix copy, filtered cells).
 
-    `countries` (restrict only within those countries) wins over `avoid_same_country`.
-    With neither set the matrix is returned unchanged. A missing country column also returns
-    the matrix unchanged, with `[{"skipped": ...}]` as the report. Filtered cells are listed
-    only when their original score was > 0.
+    `countries` (restrict only within those countries) wins over `avoid_same_country`;
+    an empty `countries` list is treated as "no named list" (falls back to the flag).
+    With no restriction requested the matrix is returned unchanged with `[]` (checked before
+    column presence, so a default call never returns a skip-marker). A missing country column
+    when a restriction IS requested returns the matrix unchanged, with `[{"skipped": ...}]` as
+    the report. Filtered cells are listed only when their original score was > 0.
     """
     out = matrix_df.copy()
+    named = {c.strip().lower() for c in countries} or None if countries else None
+    if named is None and not avoid_same_country:
+        return out, []
     if MENTOR_COLUMNS["country"] not in mentors_df.columns:
         return out, [{"skipped": "mentor country column missing"}]
     if MENTEE_COLUMNS["country"] not in mentees_df.columns:
         return out, [{"skipped": "mentee country column missing"}]
-    if countries is None and not avoid_same_country:
-        return out, []
-
-    named = {c.strip().lower() for c in countries} if countries is not None else None
     mentor_c = _countries_by_id(mentors_df, MENTOR_COLUMNS)
     mentee_c = _countries_by_id(mentees_df, MENTEE_COLUMNS)
     reason = (

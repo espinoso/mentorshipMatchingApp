@@ -34,6 +34,104 @@ st.set_page_config(
 st.markdown(CSS_STYLES, unsafe_allow_html=True)
 
 
+def _render_parse_report(report, expected_mentors, expected_mentees):
+    """Render a MatrixParseReport with the same st.* messages the old parser emitted.
+
+    Returns the parsed DataFrame, or None when the batch is unusable, so callers keep the
+    old `parse_matrix_response` contract (df-or-None). Debug gating matches the original.
+    """
+    # Fatal errors the old parser returned on immediately, before any validation output.
+    if report.df is None and report.error and report.error != "No valid mentor data after filtering":
+        if report.error == "Received a configuration object instead of JSON content":
+            st.error("❌ **Invalid response: Received configuration object instead of JSON content**")
+            st.warning("""
+            This happens when using reasoning models (gpt-5-mini, gpt-5-nano) that cannot produce structured JSON.
+
+            **Solution:** Please use a compatible model:
+            - ✅ **gpt-4.1-mini** (recommended)
+            - ✅ **gpt-4.1-nano** (fastest)
+            - ✅ **gpt-5.1** or **gpt-4.1** (highest quality)
+            """)
+        elif report.error == "Could not find JSON object boundaries in response":
+            st.error("❌ Could not find JSON object boundaries in response")
+            with st.expander("View raw response"):
+                st.text(report.raw_excerpt)
+        else:
+            st.error(f"❌ {report.error}")
+            show_debug_info()
+            with st.expander("View raw response"):
+                st.text(report.raw_excerpt)
+        return None
+
+    # Non-fatal: the model wrapped the JSON in extra prose.
+    if report.notes:
+        st.warning("⚠️ AI included explanatory text instead of pure JSON. Attempting to extract JSON...")
+        for note in report.notes:
+            with st.expander("📝 Text around JSON (should be empty)"):
+                st.text(note)
+
+    # Wrong IDs the AI returned (one warning per mentor, then the summaries).
+    for mentor_id in report.wrong_mentors:
+        st.warning(f"⚠️ AI returned WRONG mentor ID: '{mentor_id}' (not in requested batch)")
+    if report.wrong_mentors:
+        st.error(f"🚨 WRONG MENTOR IDs: AI returned {len(report.wrong_mentors)} mentor(s) NOT in requested batch!")
+        with st.expander(f"❌ Wrong mentor IDs ({len(report.wrong_mentors)})"):
+            for m in sorted(report.wrong_mentors):
+                st.write(f"- {m} (REJECTED - not in batch request)")
+
+    if report.wrong_mentees:
+        st.error(f"🚨 WRONG MENTEE IDs: AI returned {len(report.wrong_mentees)} invalid mentee(s)!")
+        with st.expander(f"❌ Wrong mentee IDs ({len(report.wrong_mentees)})"):
+            for m in sorted(report.wrong_mentees)[:10]:
+                st.write(f"- {m}")
+
+    mentors_received = len(expected_mentors) - len(report.missing_mentors)
+    mentees_received = len(expected_mentees) - len(report.missing_mentees_filled)
+    if is_debug_mode():
+        st.caption(
+            f"📊 Valid data: {mentors_received}/{len(expected_mentors)} mentors, "
+            f"{mentees_received}/{len(expected_mentees)} mentees"
+        )
+
+    expected_total = len(expected_mentors) * len(expected_mentees)
+    actual_total = round(report.completion_rate / 100 * expected_total)
+    if report.completion_rate < 100:
+        st.error(
+            f"🚨 INCOMPLETE RESPONSE: Expected {expected_total} scores, got {actual_total} "
+            f"({report.completion_rate:.1f}% complete)"
+        )
+        st.error(f"   Missing {expected_total - actual_total} combinations!")
+        st.error("   ⚠️ The AI is still omitting combinations despite instructions.")
+    elif is_debug_mode():
+        st.caption(f"✅ COMPLETE: All {expected_total} scores received")
+
+    if report.missing_mentors:
+        st.warning(f"⚠️ Missing {len(report.missing_mentors)} requested mentor(s)")
+        with st.expander(f"📋 Missing mentors ({len(report.missing_mentors)})"):
+            for m in sorted(report.missing_mentors):
+                st.write(f"- {m}")
+
+    if report.missing_mentees_filled:
+        st.warning(f"⚠️ Missing {len(report.missing_mentees_filled)} mentee(s) in responses")
+        with st.expander(f"📋 Missing mentees ({len(report.missing_mentees_filled)})"):
+            for m in sorted(report.missing_mentees_filled):
+                st.write(f"- {m}")
+
+    if report.df is None:
+        st.error("❌ No valid mentor data after filtering!")
+        return None
+
+    if report.missing_mentees_filled:
+        st.warning(
+            f"⚠️ {len(report.missing_mentees_filled)} mentee column(s) missing from matrix. "
+            "Filling with 30% (assumed poor match)."
+        )
+        st.caption("The AI omitted these combinations despite instructions. This indicates likely poor matches.")
+        show_debug_info()
+
+    return report.df
+
+
 def call_openai_api_with_chat_completions(prompt, mentees_df, mentors_df, api_key, model="gpt-4o-mini", mentor_subset=None, use_stateful=False, previous_response_id=None, is_first_batch=True):
     """Use OpenAI Responses API - replaces Chat Completions API
     
@@ -76,7 +174,7 @@ def call_openai_api_with_chat_completions(prompt, mentees_df, mentors_df, api_ke
             # Stateful mode, subsequent batch: Only send new mentor data (context preserved)
             if is_debug_mode():
                 st.info("🔗 Stateful mode: Sending only new mentor batch (context preserved from previous call)")
-            combined_data = prepare_data_for_assistant(None, mentors_to_use, [])
+            combined_data = prepare_data_for_assistant(None, mentors_to_use)
             full_message = f"Evaluate these additional mentors against the same mentees from the previous context:\n\n{combined_data}"
         else:
             # Stateless mode OR first batch: Send complete context
@@ -657,8 +755,9 @@ def generate_matrix_in_batches(mentees_df, mentors_df, api_key, model, batch_siz
                 show_debug_info()
             continue
         
-        batch_matrix_df = parse_matrix_response(response, mentor_batch, all_mentee_ids)
-        
+        batch_report = parse_matrix_response(response, mentor_batch, all_mentee_ids)
+        batch_matrix_df = _render_parse_report(batch_report, mentor_batch, all_mentee_ids)
+
         if batch_matrix_df is None:
             update_batch_progress(batch_num, 'error', {'error': 'Failed to parse response'})
             st.error(f"❌ Batch {batch_num} failed to parse")
@@ -751,10 +850,24 @@ def generate_matrix_in_batches(mentees_df, mentors_df, api_key, model, batch_siz
     st.divider()
     st.subheader("🌍 Applying Country Restrictions")
     st.info("🔍 Checking for country-based restrictions (Spain-Spain rule)...")
+    mentor_country_col = MENTOR_COLUMNS['country']
+    mentee_country_col = MENTEE_COLUMNS['country']
+    if mentor_country_col in mentors_df.columns and mentee_country_col in mentees_df.columns:
+        spain_mentors = (mentors_df[mentor_country_col].astype(str).str.strip().str.lower() == 'spain').sum()
+        spain_mentees = (mentees_df[mentee_country_col].astype(str).str.strip().str.lower() == 'spain').sum()
+        if spain_mentors and spain_mentees:
+            st.info(f"🇪🇸 Found {spain_mentors} Spanish mentor(s) and {spain_mentees} Spanish mentee(s)")
+
+    # countries=["spain"] preserves the legacy hardcoded Spain-Spain restriction (see Task 6).
     complete_matrix_df, filtered_matches = apply_country_restrictions(
-        complete_matrix_df, mentees_df, mentors_df
+        complete_matrix_df, mentees_df, mentors_df, countries=["spain"]
     )
-    
+
+    # A missing country column yields a skip-marker; render it like the old warning, no filtering.
+    if filtered_matches and "skipped" in filtered_matches[0]:
+        st.warning(f"⚠️ {filtered_matches[0]['skipped']}. Skipping country restrictions.")
+        filtered_matches = []
+
     # Display filtered matches information
     if filtered_matches:
         st.warning(f"🚫 **Country Restriction Applied**: {len(filtered_matches)} match(es) filtered")
@@ -867,8 +980,9 @@ def generate_matrix_in_batches(mentees_df, mentors_df, api_key, model, batch_siz
                         time.sleep(5)
                     continue
                 
-                retry_matrix_df = parse_matrix_response(retry_response, list(current_missing), all_mentee_ids)
-                
+                retry_report = parse_matrix_response(retry_response, list(current_missing), all_mentee_ids)
+                retry_matrix_df = _render_parse_report(retry_report, list(current_missing), all_mentee_ids)
+
                 if retry_matrix_df is not None and len(retry_matrix_df) > 0:
                     added_count = 0
                     for mentor_id in retry_matrix_df.index:
@@ -879,7 +993,7 @@ def generate_matrix_in_batches(mentees_df, mentors_df, api_key, model, batch_siz
                     
                     # Rebuild complete matrix from updated dictionary
                     complete_matrix_df = pd.DataFrame(combined_matrix_dict).T
-                    complete_matrix_df = complete_matrix_df[sorted(all_mentee_ids)]
+                    complete_matrix_df = complete_matrix_df[[str(m) for m in sorted(all_mentee_ids)]]
                     
                     mentors_received = len(complete_matrix_df)
                     st.info(f"📈 Matrix now has {mentors_received}/{expected_count} mentors")

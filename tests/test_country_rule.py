@@ -81,3 +81,22 @@ def test_input_matrix_not_mutated():
     matrix, mentees, mentors = _frames(["Spain"], ["Spain"])
     apply_country_restrictions(matrix, mentees, mentors, avoid_same_country=True)
     assert matrix.loc["1", "101"] == 50
+
+
+def test_empty_countries_list_does_not_disable_avoid_flag():
+    # Hardening: countries=[] must NOT silently turn the rule off when avoiding same-country.
+    matrix, mentees, mentors = _frames(["Spain"], ["Spain"])
+    out, filtered = apply_country_restrictions(
+        matrix, mentees, mentors, avoid_same_country=True, countries=[]
+    )
+    assert out.loc["1", "101"] == 0
+    assert [(f["mentor_id"], f["mentee_id"]) for f in filtered] == [("1", "101")]
+
+
+def test_no_restriction_returns_empty_before_column_check():
+    # Hardening: the no-restriction default returns [] even when a country column is missing,
+    # never a skip-marker.
+    matrix, mentees, mentors = _frames(["Spain"], ["Spain"])
+    out, filtered = apply_country_restrictions(matrix, mentees, mentors.drop(columns=[MC]))
+    assert out.equals(matrix)
+    assert filtered == []

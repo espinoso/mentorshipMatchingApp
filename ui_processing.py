@@ -15,7 +15,7 @@ import streamlit as st
 from info import MENTEE_COLUMNS, MENTOR_COLUMNS
 from matching import check_mentor_conflicts, hungarian_assignment
 from progress_ui import render_processing_summary
-from utils import is_debug_mode
+from utils import is_debug_mode, show_debug_info
 from validation import analyze_score_distribution, validate_and_flag_matches
 from visualization import create_heatmap
 
@@ -206,7 +206,22 @@ def render_processing_tab():
                 
                 # Get max_mentees_per_mentor from session state (default to 2 for backward compatibility)
                 max_mentees_per_mentor = st.session_state.get('max_mentees_per_mentor', 2)
-                assignments = hungarian_assignment(matrix_df, max_mentees_per_mentor=max_mentees_per_mentor)
+                result = hungarian_assignment(matrix_df, max_mentees_per_mentor=max_mentees_per_mentor)
+
+                # Render the matrix-cleaning notes the old (st-coupled) solver used to emit.
+                cleaning = result.cleaning
+                if cleaning['nan_filled']:
+                    st.warning(f"⚠️ Found {cleaning['nan_filled']} NaN values in matrix. Replacing with 30% (poor match - AI omitted these)...")
+                    st.caption("NaN values indicate the AI skipped these combinations despite instructions. Treating as poor matches.")
+                    show_debug_info()
+                if cleaning['inf_replaced']:
+                    st.warning(f"⚠️ Found {cleaning['inf_replaced']} infinite values in matrix. Replacing with 50%...")
+                if cleaning['clipped']:
+                    st.warning(f"⚠️ Clipped {cleaning['clipped']} matrix value(s) outside the expected range [0, 100].")
+                if result.unmatched_mentees:
+                    st.warning(f"⚠️ {len(result.unmatched_mentees)} mentee(s) could not be matched (no mentor capacity left): {', '.join(map(str, result.unmatched_mentees))}")
+
+                assignments = result.assignments
                 st.session_state.assignments = assignments
                 
                 # Calculate statistics
