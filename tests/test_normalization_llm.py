@@ -104,3 +104,21 @@ def test_setup_claude_uses_haiku_and_env_key(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY")
     with pytest.raises(LLMError, match="ANTHROPIC_API_KEY"):
         shared_utils.setup_claude()
+
+
+def test_program_split_accepts_fenced_json():
+    c = FakeClaude('```json\n{"level": "Masters", "specialization": "Data Science"}\n```')
+    assert mentee.split_current_education_program("MSc DS", c, AICache(), 1) == (
+        "Masters",
+        "Data Science",
+    )
+    assert len(c.calls) == 1  # parsed first try, no retry
+
+
+def test_mentor_education_accepts_fenced_json():
+    c = FakeClaude('```json\n{"level": "PhD", "field": "Physics"}\n```')
+    assert mentor.extract_education_level_and_field("PhD Physics", c, AICache(), 1) == (
+        "PhD",
+        "Physics",
+    )
+    assert len(c.calls) == 1

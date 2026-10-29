@@ -4,7 +4,6 @@ Transforms PRE format to POST format with full automation.
 """
 
 import argparse
-import json
 import os
 import sys
 import time
@@ -26,6 +25,8 @@ from shared_utils import (
     validate_required_columns,
     write_error_log,
 )
+
+from llm_client import LLMError, parse_json
 
 # Import normalization utilities
 from normalization import (
@@ -123,7 +124,7 @@ Examples:
             
             # Parse JSON
             try:
-                parsed = json.loads(result)
+                parsed = parse_json(result)
                 level = parsed.get("level", "ERROR")
                 field = parsed.get("field", "ERROR: No field found")
                 
@@ -133,7 +134,7 @@ Examples:
                 print(f"Row {row_num}: Extracted Level='{level}', Field='{field}'")
                 return level, field
                 
-            except json.JSONDecodeError:
+            except LLMError:
                 print(f"Row {row_num}: Failed to parse JSON response: {result}")
                 if attempt < MAX_RETRIES - 1:
                     continue
