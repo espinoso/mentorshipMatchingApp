@@ -3,27 +3,34 @@ Enhanced Mentee Skills Merger and Normalizer
 Transforms PRE format to POST format with full automation.
 """
 
-import pandas as pd
-import openai
-import os
-import time
-import sys
 import argparse
-from typing import Tuple
 import json
+import os
+import sys
+import time
+
+import openai
+import pandas as pd
 
 # Import shared utilities
 from shared_utils import (
-    AICache, find_column_flexible, generate_output_filename,
-    clean_dataframe, find_missing_data, validate_required_columns,
-    TransformationReport, write_error_log
+    AICache,
+    TransformationReport,
+    clean_dataframe,
+    find_column_flexible,
+    find_missing_data,
+    generate_output_filename,
+    validate_required_columns,
+    write_error_log,
 )
 
 # Import normalization utilities
 from normalization import (
-    normalize_university_name, normalize_country_name,
-    normalize_education_level_with_patterns, normalize_text_general,
-    normalize_languages
+    normalize_country_name,
+    normalize_education_level_with_patterns,
+    normalize_languages,
+    normalize_text_general,
+    normalize_university_name,
 )
 
 # Configuration
@@ -127,7 +134,7 @@ Return ONLY one of the four standardized values above, nothing else. If it's a M
                 return education_text
                 
         except Exception as e:
-            print(f"Row {row_num}: Education normalization attempt {attempt + 1} failed: {str(e)}")
+            print(f"Row {row_num}: Education normalization attempt {attempt + 1} failed: {e!s}")
             if attempt < MAX_RETRIES - 1:
                 time.sleep(RETRY_DELAY)
             else:
@@ -135,7 +142,7 @@ Return ONLY one of the four standardized values above, nothing else. If it's a M
                 return education_text
 
 
-def split_current_education_program(program: str, client, cache: AICache, row_num: int) -> Tuple[str, str]:
+def split_current_education_program(program: str, client, cache: AICache, row_num: int) -> tuple[str, str]:
     """
     Use OpenAI to split current education program into level and specialization
     Returns: (level, specialization) where level is one of: PhD, Masters, Bachelors
@@ -209,7 +216,7 @@ Examples:
                     return "ERROR", f"ERROR: Could not parse '{program_text}'"
                 
         except Exception as e:
-            print(f"Row {row_num}: Program split attempt {attempt + 1} failed: {str(e)}")
+            print(f"Row {row_num}: Program split attempt {attempt + 1} failed: {e!s}")
             if attempt < MAX_RETRIES - 1:
                 time.sleep(RETRY_DELAY)
             else:
@@ -280,7 +287,7 @@ Return only the broad field category:"""
             return result
             
         except Exception as e:
-            print(f"Row {row_num}: Field determination attempt {attempt + 1} failed: {str(e)}")
+            print(f"Row {row_num}: Field determination attempt {attempt + 1} failed: {e!s}")
             if attempt < MAX_RETRIES - 1:
                 time.sleep(RETRY_DELAY)
             else:
@@ -365,7 +372,7 @@ Now process the fields above and return only the normalized comma-separated list
             return result
             
         except Exception as e:
-            print(f"Row {row_num}: Skills merge attempt {attempt + 1} failed: {str(e)}")
+            print(f"Row {row_num}: Skills merge attempt {attempt + 1} failed: {e!s}")
             if attempt < MAX_RETRIES - 1:
                 time.sleep(RETRY_DELAY)
             else:
@@ -531,7 +538,7 @@ def process_mentee_file(input_file: str, output_file: str = None, dry_run: bool 
             report.record_operation('education_levels_normalized')
             report.record_success(idx + 1)
         except Exception as e:
-            print(f"\nRow {idx + 1}: Error normalizing education level: {str(e)}")
+            print(f"\nRow {idx + 1}: Error normalizing education level: {e!s}")
             normalized_education.append("N/A")
             report.record_failure(idx + 1, "Education normalization", str(e))
         
@@ -539,7 +546,7 @@ def process_mentee_file(input_file: str, output_file: str = None, dry_run: bool 
     
     df_output[MENTEE_COLUMNS['education_level']] = normalized_education
     print("\n" + "-" * 80)
-    print(f"   ✓ Normalized all education levels")
+    print("   ✓ Normalized all education levels")
     
     # STEP 2: Split current education program
     print("\n6. Splitting current education programs...")
@@ -563,7 +570,7 @@ def process_mentee_file(input_file: str, output_file: str = None, dry_run: bool 
             extracted_specializations.append(specialization)
             report.record_operation('education_programs_split')
         except Exception as e:
-            print(f"\nRow {idx + 1}: Error splitting program: {str(e)}")
+            print(f"\nRow {idx + 1}: Error splitting program: {e!s}")
             split_levels.append("N/A")
             extracted_specializations.append("N/A")
             report.record_failure(idx + 1, "Program splitting", str(e))
@@ -572,7 +579,7 @@ def process_mentee_file(input_file: str, output_file: str = None, dry_run: bool 
     
     df_output[MENTEE_COLUMNS['current_program']] = split_levels
     print("\n" + "-" * 80)
-    print(f"   ✓ Split all education programs")
+    print("   ✓ Split all education programs")
     
     # STEP 3: Determine broad Field of Expertise
     print("\n7. Determining broad Field of Expertise categories...")
@@ -597,7 +604,7 @@ def process_mentee_file(input_file: str, output_file: str = None, dry_run: bool 
             broad_fields.append(broad_field)
             report.record_operation('fields_classified')
         except Exception as e:
-            print(f"\nRow {idx + 1}: Error classifying field: {str(e)}")
+            print(f"\nRow {idx + 1}: Error classifying field: {e!s}")
             broad_fields.append("N/A")
             report.record_failure(idx + 1, "Field classification", str(e))
         
@@ -607,7 +614,7 @@ def process_mentee_file(input_file: str, output_file: str = None, dry_run: bool 
     broad_fields_normalized = [normalize_text_general(field) if pd.notna(field) else "N/A" for field in broad_fields]
     df_output[MENTEE_COLUMNS['field']] = broad_fields_normalized
     print("\n" + "-" * 80)
-    print(f"   ✓ Determined broad field categories")
+    print("   ✓ Determined broad field categories")
     
     # STEP 4: Merge and normalize all specialization/skills fields
     print("\n8. Merging and normalizing specializations and skills...")
@@ -636,7 +643,7 @@ def process_mentee_file(input_file: str, output_file: str = None, dry_run: bool 
             merged_skills.append(normalized)
             report.record_operation('skills_merged')
         except Exception as e:
-            print(f"\nRow {idx + 1}: Error merging skills: {str(e)}")
+            print(f"\nRow {idx + 1}: Error merging skills: {e!s}")
             merged_skills.append("N/A")
             report.record_failure(idx + 1, "Skills merging", str(e))
         
@@ -646,7 +653,7 @@ def process_mentee_file(input_file: str, output_file: str = None, dry_run: bool 
     merged_skills_normalized = [normalize_text_general(skill) if pd.notna(skill) else "N/A" for skill in merged_skills]
     df_output[MENTEE_COLUMNS['specialization']] = merged_skills_normalized
     print("\n" + "-" * 80)
-    print(f"   ✓ Merged and normalized all skills")
+    print("   ✓ Merged and normalized all skills")
     
     # Clean data (NaN → N/A, trim whitespace)
     print("\n9. Cleaning data...")
@@ -678,11 +685,11 @@ def process_mentee_file(input_file: str, output_file: str = None, dry_run: bool 
     
     # Save to output file (unless dry-run)
     if not dry_run:
-        print(f"\n12. Saving output file...")
+        print("\n12. Saving output file...")
         df_output.to_excel(output_file, index=False)
         print(f"   ✓ Output saved to: {output_file}")
     else:
-        print(f"\n12. DRY-RUN MODE: Skipping file write")
+        print("\n12. DRY-RUN MODE: Skipping file write")
         print(f"   Would save to: {output_file}")
     
     # Show sample results
@@ -833,7 +840,7 @@ def main():
         print("\n\n⚠ Processing interrupted by user")
         sys.exit(1)
     except Exception as e:
-        print(f"\n\n✗ Fatal error: {str(e)}")
+        print(f"\n\n✗ Fatal error: {e!s}")
         import traceback
         traceback.print_exc()
         sys.exit(1)

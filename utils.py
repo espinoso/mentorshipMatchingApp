@@ -1,11 +1,18 @@
+import numpy as np
+import pandas as pd
+import streamlit as st
 import tiktoken
 from openai import OpenAI
-import streamlit as st
-import pandas as pd
-import numpy as np
+
 from info import (
-    MENTEE_COLUMNS, MENTOR_COLUMNS, API_PRICING, EXCLUDED_MODEL_PREFIXES, MODEL_CONFIGS, RELATED_FIELD_GROUPS
+    API_PRICING,
+    EXCLUDED_MODEL_PREFIXES,
+    MENTEE_COLUMNS,
+    MENTOR_COLUMNS,
+    MODEL_CONFIGS,
+    RELATED_FIELD_GROUPS,
 )
+
 
 def validate_uploaded_file(df, file_type):
     """Validate uploaded files and show warnings"""
@@ -98,7 +105,7 @@ def fetch_available_models(api_key: str):
             models = client.models.list()
         except Exception as list_error:
             # If models.list() fails (e.g., Responses API doesn't support it), use fallback
-            raise Exception(f"Models API not available: {str(list_error)}")
+            raise Exception(f"Models API not available: {list_error!s}")
         
         # Filter out non-chat models (embeddings, TTS, whisper, etc.)
         # Include all chat/completion models (gpt-*, o1-*, o3-*, chatgpt-*, etc.)
@@ -135,7 +142,7 @@ def fetch_available_models(api_key: str):
                     speed = "Medium"
                     cost_estimate = "$1.25-10 per 1k pairs"
             
-            elif model_id.startswith('o1-') or model_id.startswith('o3-'):
+            elif model_id.startswith(('o1-', 'o3-')):
                 if 'mini' in model_id:
                     quality = "Excellent"
                     speed = "Slow"
@@ -198,7 +205,7 @@ def fetch_available_models(api_key: str):
         }
         # Only show error in debug mode, otherwise silently use fallback
         if is_debug_mode():
-            st.warning(f"⚠️ Could not fetch models from API (using fallback): {str(e)}")
+            st.warning(f"⚠️ Could not fetch models from API (using fallback): {e!s}")
         return fallback_models
 
 def estimate_api_cost(prompt_tokens: int, completion_tokens: int, model: str = "gpt-4o-mini") -> float:

@@ -3,8 +3,10 @@ UI Component for Tab 1: Configure Settings
 Handles API key configuration, model selection, batch size, and stateful mode settings
 """
 
-import streamlit as st
 from datetime import datetime
+
+import streamlit as st
+
 from utils import fetch_available_models, get_model_config, is_debug_mode
 
 
@@ -14,7 +16,7 @@ def render_config_tab():
     # API Key status (only show in debug mode)
     if is_debug_mode():
         if st.session_state.api_key:
-            st.markdown(f"""
+            st.markdown("""
             <div class="success-card">
                 ✅ OpenAI API key loaded from environment variable <code>OPENAI_API_KEY</code>
             </div>
@@ -60,7 +62,7 @@ def render_config_tab():
         filtered_models = {k: v for k, v in available_models.items() if k in allowed_models}
         
         if not filtered_models:
-            st.warning(f"⚠️ None of the recommended models are available. Using all models.")
+            st.warning("⚠️ None of the recommended models are available. Using all models.")
             filtered_models = available_models
         
         sorted_model_ids = sorted(

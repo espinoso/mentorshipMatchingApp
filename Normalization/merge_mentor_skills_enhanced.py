@@ -3,29 +3,36 @@ Enhanced Mentor Skills Merger and Normalizer
 Transforms PRE format to POST format with full automation.
 """
 
-import pandas as pd
-import openai
-import os
-import time
-import sys
 import argparse
-from typing import Tuple
 import json
+import os
+import sys
+import time
 
-# Import shared utilities
-from shared_utils import (
-    AICache, find_column_flexible, generate_output_filename,
-    clean_dataframe, find_missing_data, validate_required_columns,
-    TransformationReport, write_error_log
-)
+import openai
+import pandas as pd
 
 # Import institution type normalization
 from institution_types import normalize_institution_type
 
+# Import shared utilities
+from shared_utils import (
+    AICache,
+    TransformationReport,
+    clean_dataframe,
+    find_column_flexible,
+    find_missing_data,
+    generate_output_filename,
+    validate_required_columns,
+    write_error_log,
+)
+
 # Import normalization utilities
 from normalization import (
-    normalize_mentor_country, normalize_mentor_country_of_origin, 
-    normalize_mentor_alma_mater, normalize_mentor_field_of_expertise
+    normalize_mentor_alma_mater,
+    normalize_mentor_country,
+    normalize_mentor_country_of_origin,
+    normalize_mentor_field_of_expertise,
 )
 
 # Configuration
@@ -77,7 +84,7 @@ def setup_openai():
     return openai
 
 
-def extract_education_level_and_field(education_text: str, client, cache: AICache, row_num: int) -> Tuple[str, str]:
+def extract_education_level_and_field(education_text: str, client, cache: AICache, row_num: int) -> tuple[str, str]:
     """
     Extract education level and field from combined education description.
     Similar to mentee program splitting.
@@ -152,7 +159,7 @@ Examples:
                     return "ERROR", f"ERROR: Could not parse '{edu_text}'"
                 
         except Exception as e:
-            print(f"Row {row_num}: Education extraction attempt {attempt + 1} failed: {str(e)}")
+            print(f"Row {row_num}: Education extraction attempt {attempt + 1} failed: {e!s}")
             if attempt < MAX_RETRIES - 1:
                 time.sleep(RETRY_DELAY)
             else:
@@ -260,7 +267,7 @@ Now process the fields above and return only the normalized comma-separated list
             return result
             
         except Exception as e:
-            print(f"Row {row_num}: Skills merge attempt {attempt + 1} failed: {str(e)}")
+            print(f"Row {row_num}: Skills merge attempt {attempt + 1} failed: {e!s}")
             if attempt < MAX_RETRIES - 1:
                 time.sleep(RETRY_DELAY)
             else:
@@ -392,7 +399,7 @@ def process_mentor_file(input_file: str, output_file: str = None, dry_run: bool 
         df_output[MENTOR_COLUMNS['alma_mater']] = "N/A"
     
     # Store original field for specialization merge (before we normalize it)
-    original_field_of_expertise = df[pre_cols['field']].copy() if pre_cols['field'] else pd.Series(["N/A"] * len(df))
+    original_field_of_expertise = df[pre_cols['field']].copy() if pre_cols['field'] else pd.Series(["N/A"] * len(df))  # noqa: F841 - flagged: computed but never read, check intended specialization merge
     
     # Normalize field of expertise (map to broad category, extract specific terms)
     print("\n5. Normalizing fields of expertise...")
@@ -417,7 +424,7 @@ def process_mentor_file(input_file: str, output_file: str = None, dry_run: bool 
             extracted_field_terms.append(spec_terms)
             report.record_operation('fields_classified')
         except Exception as e:
-            print(f"\nRow {idx + 1}: Error normalizing field: {str(e)}")
+            print(f"\nRow {idx + 1}: Error normalizing field: {e!s}")
             normalized_fields.append("N/A")
             extracted_field_terms.append([])
             report.record_failure(idx + 1, "Field normalization", str(e))
@@ -426,7 +433,7 @@ def process_mentor_file(input_file: str, output_file: str = None, dry_run: bool 
     
     df_output[MENTOR_COLUMNS['field']] = normalized_fields
     print("\n" + "-" * 80)
-    print(f"   ✓ Normalized all fields of expertise")
+    print("   ✓ Normalized all fields of expertise")
     
     if pre_cols['experience_years']:
         df_output[MENTOR_COLUMNS['experience_years']] = df[pre_cols['experience_years']].fillna("N/A")
@@ -466,7 +473,7 @@ def process_mentor_file(input_file: str, output_file: str = None, dry_run: bool 
             
             report.record_operation('institution_types_normalized')
         except Exception as e:
-            print(f"\nRow {idx + 1}: Error normalizing institution type: {str(e)}")
+            print(f"\nRow {idx + 1}: Error normalizing institution type: {e!s}")
             normalized_institution_types.append("N/A")
             original_institution_types_for_spec.append("")
             report.record_failure(idx + 1, "Institution type normalization", str(e))
@@ -475,11 +482,11 @@ def process_mentor_file(input_file: str, output_file: str = None, dry_run: bool 
     
     df_output[MENTOR_COLUMNS['institution_type']] = normalized_institution_types
     print("\n" + "-" * 80)
-    print(f"   ✓ Normalized all institution types")
+    print("   ✓ Normalized all institution types")
     
     # Show transformation log
     if institution_type_transformations:
-        print(f"\n   Institution Type Transformations (for review):")
+        print("\n   Institution Type Transformations (for review):")
         for trans in institution_type_transformations:
             print(f"     {trans}")
     
@@ -500,7 +507,7 @@ def process_mentor_file(input_file: str, output_file: str = None, dry_run: bool 
             extracted_fields.append(field)
             report.record_operation('education_levels_normalized')
         except Exception as e:
-            print(f"\nRow {idx + 1}: Error extracting education: {str(e)}")
+            print(f"\nRow {idx + 1}: Error extracting education: {e!s}")
             extracted_levels.append("N/A")
             extracted_fields.append("N/A")
             report.record_failure(idx + 1, "Education extraction", str(e))
@@ -509,7 +516,7 @@ def process_mentor_file(input_file: str, output_file: str = None, dry_run: bool 
     
     df_output[MENTOR_COLUMNS['education_level']] = extracted_levels
     print("\n" + "-" * 80)
-    print(f"   ✓ Extracted all education levels and fields")
+    print("   ✓ Extracted all education levels and fields")
     
     # STEP 3: Merge and normalize skills
     print("\n7. Merging and normalizing specializations and skills...")
@@ -564,7 +571,7 @@ def process_mentor_file(input_file: str, output_file: str = None, dry_run: bool 
             merged_skills.append(normalized)
             report.record_operation('skills_merged')
         except Exception as e:
-            print(f"\nRow {idx + 1}: Error merging skills: {str(e)}")
+            print(f"\nRow {idx + 1}: Error merging skills: {e!s}")
             # Fallback: just combine the sources
             fallback = ", ".join([s for s in all_sources if s]).lower()
             merged_skills.append(fallback if fallback else "N/A")
@@ -574,7 +581,7 @@ def process_mentor_file(input_file: str, output_file: str = None, dry_run: bool 
     
     df_output[MENTOR_COLUMNS['specialization']] = merged_skills
     print("\n" + "-" * 80)
-    print(f"   ✓ Merged and normalized all skills")
+    print("   ✓ Merged and normalized all skills")
     
     # Clean data (NaN → N/A, trim whitespace)
     print("\n8. Cleaning data...")
@@ -607,11 +614,11 @@ def process_mentor_file(input_file: str, output_file: str = None, dry_run: bool 
     
     # Save to output file (unless dry-run)
     if not dry_run:
-        print(f"\n11. Saving output file...")
+        print("\n11. Saving output file...")
         df_output.to_excel(output_file, index=False)
         print(f"   ✓ Output saved to: {output_file}")
     else:
-        print(f"\n11. DRY-RUN MODE: Skipping file write")
+        print("\n11. DRY-RUN MODE: Skipping file write")
         print(f"   Would save to: {output_file}")
     
     # Show sample results
@@ -751,7 +758,7 @@ def main():
         print("\n\n⚠ Processing interrupted by user")
         sys.exit(1)
     except Exception as e:
-        print(f"\n\n✗ Fatal error: {str(e)}")
+        print(f"\n\n✗ Fatal error: {e!s}")
         import traceback
         traceback.print_exc()
         sys.exit(1)

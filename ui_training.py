@@ -3,11 +3,13 @@ UI Component for Tab 2: Training Files
 Handles training file management, including viewing existing files in OpenAI storage and uploading new ones
 """
 
-import streamlit as st
-import pandas as pd
 import time
+
+import pandas as pd
+import streamlit as st
+
+from openai_files import delete_openai_files, list_openai_files, upload_training_files_to_openai
 from utils import clean_dataframe
-from openai_files import list_openai_files, upload_training_files_to_openai, delete_openai_files
 
 
 def render_training_tab():
@@ -114,7 +116,7 @@ def render_training_tab():
                         selected_files.append(file_info)
                 
                 with col2:
-                    if st.button(f"🗑️", key=f"delete_{file_info['id']}", help="Delete this file"):
+                    if st.button("🗑️", key=f"delete_{file_info['id']}", help="Delete this file"):
                         with st.spinner("Deleting..."):
                             deleted = delete_openai_files(st.session_state.api_key, [file_info['id']])
                             if deleted > 0:
@@ -193,7 +195,7 @@ def render_training_tab():
                 except Exception as e:
                     st.markdown(f"""
                     <div class="conflict-warning">
-                        ❌ <strong>{file.name}</strong>: {str(e)}
+                        ❌ <strong>{file.name}</strong>: {e!s}
                     </div>
                     """, unsafe_allow_html=True)
             

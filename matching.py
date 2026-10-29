@@ -5,12 +5,14 @@ Contains functions for optimal assignment, conflict detection, and response pars
 
 import json
 import re
-import pandas as pd
+
 import numpy as np
+import pandas as pd
 import streamlit as st
 from scipy.optimize import linear_sum_assignment
-from utils import show_debug_info
+
 from info import MENTEE_COLUMNS, MENTOR_COLUMNS
+from utils import show_debug_info
 
 
 def parse_matrix_response(response_text, expected_mentors, expected_mentees):
@@ -48,15 +50,11 @@ def parse_matrix_response(response_text, expected_mentors, expected_mentees):
             """)
             return None
         
-        if response_text.startswith('```json'):
-            response_text = response_text[7:]
-        if response_text.startswith('```'):
-            response_text = response_text[3:]
-        if response_text.endswith('```'):
-            response_text = response_text[:-3]
+        response_text = response_text.removeprefix('```json')
+        response_text = response_text.removeprefix('```')
+        response_text = response_text.removesuffix('```')
         response_text = response_text.strip()
         
-        import re
         
         first_brace = response_text.find('{')
         last_brace = response_text.rfind('}')
@@ -97,8 +95,8 @@ def parse_matrix_response(response_text, expected_mentors, expected_mentees):
         matrix_dict = {}
         all_mentees = set()
         
-        expected_mentor_set = set(str(x) for x in expected_mentors)
-        expected_mentee_set = set(str(x) for x in expected_mentees)
+        expected_mentor_set = {str(x) for x in expected_mentors}
+        expected_mentee_set = {str(x) for x in expected_mentees}
         wrong_mentors = []
         wrong_mentees = []
         
@@ -160,7 +158,7 @@ def parse_matrix_response(response_text, expected_mentors, expected_mentees):
             
             st.error(f"🚨 INCOMPLETE RESPONSE: Expected {expected_total_scores} scores, got {actual_total_scores} ({completion_rate:.1f}% complete)")
             st.error(f"   Missing {missing_count} combinations!")
-            st.error(f"   ⚠️ The AI is still omitting combinations despite instructions.")
+            st.error("   ⚠️ The AI is still omitting combinations despite instructions.")
             
             if is_debug_mode():
                 with st.expander("📋 Mentors with incomplete score arrays"):
@@ -174,14 +172,14 @@ def parse_matrix_response(response_text, expected_mentors, expected_mentees):
                 st.caption(f"✅ COMPLETE: All {expected_total_scores} scores received")
         
         if mentors_received < expected_mentor_count:
-            missing_mentors = set(str(m) for m in expected_mentors) - set(matrix_dict.keys())
+            missing_mentors = {str(m) for m in expected_mentors} - set(matrix_dict.keys())
             st.warning(f"⚠️ Missing {len(missing_mentors)} requested mentor(s)")
             with st.expander(f"📋 Missing mentors ({len(missing_mentors)})"):
                 for m in sorted(missing_mentors):
                     st.write(f"- {m}")
         
         if mentees_received < expected_mentee_count:
-            missing_mentees = set(str(m) for m in expected_mentees) - all_mentees
+            missing_mentees = {str(m) for m in expected_mentees} - all_mentees
             st.warning(f"⚠️ Missing {len(missing_mentees)} mentee(s) in responses")
             with st.expander(f"📋 Missing mentees ({len(missing_mentees)})"):
                 for m in sorted(missing_mentees):
@@ -207,7 +205,7 @@ def parse_matrix_response(response_text, expected_mentors, expected_mentees):
         return df
         
     except (json.JSONDecodeError, ValueError, KeyError) as e:
-        st.error(f"❌ Error parsing matrix response: {str(e)}")
+        st.error(f"❌ Error parsing matrix response: {e!s}")
         show_debug_info()
         with st.expander("View raw response"):
             st.text(response_text[:2000])

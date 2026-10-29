@@ -12,20 +12,19 @@ Refactored version with:
 import html
 import time
 from io import BytesIO
-from typing import Literal, Optional, Tuple, Dict, Any, List
+from typing import Literal
 
-import streamlit as st
 import pandas as pd
+import streamlit as st
 
 from info import MENTEE_COLUMNS, MENTOR_COLUMNS
-from utils import clean_dataframe, validate_uploaded_file
 from normalization_utils import (
+    create_download_bytes,
     detect_file_format,
     process_file_with_progress,
-    create_download_bytes,
-    validate_pre_format_columns
+    validate_pre_format_columns,
 )
-
+from utils import clean_dataframe, validate_uploaded_file
 
 # =============================================================================
 # TYPE ALIASES
@@ -129,7 +128,7 @@ def get_processing_status(file_type: FileType) -> Literal['idle', 'processing', 
     return 'idle'
 
 
-def get_progress_messages(file_type: FileType) -> List[str]:
+def get_progress_messages(file_type: FileType) -> list[str]:
     """Get progress messages from processing info or progress state."""
     messages = []
     
@@ -151,7 +150,7 @@ def get_progress_messages(file_type: FileType) -> List[str]:
     return messages
 
 
-def render_log_container(messages: List[str], show_header: bool = True):
+def render_log_container(messages: list[str], show_header: bool = True):
     """Render a scrollable log container with messages. Does nothing if no messages."""
     if not messages:
         return
@@ -234,7 +233,6 @@ def run_file_processing(file_type: FileType):
             'progress_state': progress_state.copy()
         }
         processed_df = None
-        output_file = None
     
     # Update progress state from processing info
     if processing_info:
@@ -323,7 +321,7 @@ the system will work fine. Empty optional fields won't affect matching quality.
 """)
 
 
-def render_processing_ui(file_type: FileType, messages: List[str]):
+def render_processing_ui(file_type: FileType, messages: list[str]):
     """Render the processing status UI based on current state."""
     status = get_processing_status(file_type)
     config = FILE_TYPE_CONFIG[file_type]
@@ -404,7 +402,7 @@ def render_file_upload_section(file_type: FileType, any_processing: bool, other_
         st.info(f"⏳ Please wait for {other_type} processing to complete before uploading {file_type} files.")
     
     if is_current_type_processing:
-        st.info(f"⏳ Processing in progress. Please wait for normalization to complete.")
+        st.info("⏳ Processing in progress. Please wait for normalization to complete.")
     
     # File uploader - disabled if any processing OR if this type is processing
     uploaded_file = st.file_uploader(
@@ -574,7 +572,7 @@ def render_file_upload_section(file_type: FileType, any_processing: bool, other_
     
     except Exception as e:
         render_html_card(
-            f"❌ <strong>Error loading file:</strong> {str(e)}<br>"
+            f"❌ <strong>Error loading file:</strong> {e!s}<br>"
             "<small>Make sure it's a valid Excel (.xlsx) file</small>",
             "conflict-warning"
         )

@@ -3,10 +3,11 @@ OpenAI File Management functions for the Mentorship Matching System
 Contains functions for listing, uploading, and deleting files in OpenAI storage
 """
 
-from openai import OpenAI
-import streamlit as st
-from io import BytesIO
 from datetime import datetime
+from io import BytesIO
+
+import streamlit as st
+from openai import OpenAI
 
 
 def list_openai_files(api_key):
@@ -32,7 +33,7 @@ def list_openai_files(api_key):
         
         return file_list
     except Exception as e:
-        st.error(f"❌ Error listing files: {str(e)}")
+        st.error(f"❌ Error listing files: {e!s}")
         return []
 
 
@@ -62,7 +63,7 @@ def upload_training_files_to_openai(training_dfs, api_key):
         return uploaded_file_ids
         
     except Exception as e:
-        st.error(f"❌ Error uploading files: {str(e)}")
+        st.error(f"❌ Error uploading files: {e!s}")
         return []
 
 
@@ -77,11 +78,11 @@ def delete_openai_files(api_key, file_ids):
                 client.files.delete(file_id)
                 deleted_count += 1
             except Exception as e:
-                st.warning(f"Could not delete {file_id}: {str(e)}")
+                st.warning(f"Could not delete {file_id}: {e!s}")
         
         return deleted_count
         
     except Exception as e:
-        st.error(f"❌ Error deleting files: {str(e)}")
+        st.error(f"❌ Error deleting files: {e!s}")
         return 0
 

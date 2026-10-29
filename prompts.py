@@ -4,7 +4,8 @@ Contains all prompt generation functions for the matching algorithm
 """
 
 import streamlit as st
-from info import MENTEE_COLUMNS, MENTOR_COLUMNS, JSON_FOOTER, FIELD_COMPATIBILITY_MATRIX_TEXT
+
+from info import FIELD_COMPATIBILITY_MATRIX_TEXT, JSON_FOOTER, MENTEE_COLUMNS, MENTOR_COLUMNS
 
 # ============================================================================
 # PROMPT CONSTANTS - Single source of truth for JSON instructions

@@ -3,9 +3,9 @@ Data validation and quality analysis functions for the Mentorship Matching Syste
 Contains functions for validating matches, analyzing score distributions, and preparing data
 """
 
-import streamlit as st
-import pandas as pd
 import numpy as np
+import streamlit as st
+
 from info import MENTEE_COLUMNS, MENTOR_COLUMNS
 from utils import is_field_compatible
 
@@ -69,8 +69,8 @@ def validate_and_flag_matches(matches, mentees_df, mentors_df):
                 mentee_spec = str(mentee.get(MENTEE_COLUMNS['specialization'], '')).lower()
                 mentor_spec = str(mentor.get(MENTOR_COLUMNS['specialization'], '')).lower()
                 
-                mentee_words = set(word for word in mentee_spec.split() if len(word) > 3)
-                mentor_words = set(word for word in mentor_spec.split() if len(word) > 3)
+                mentee_words = {word for word in mentee_spec.split() if len(word) > 3}
+                mentor_words = {word for word in mentor_spec.split() if len(word) > 3}
                 overlap = len(mentee_words & mentor_words)
                 
                 if overlap == 0 and mentee_spec and mentor_spec:

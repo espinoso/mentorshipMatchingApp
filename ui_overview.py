@@ -65,7 +65,7 @@ def render_overview_tab():
         """, unsafe_allow_html=True)
     
     except Exception as e:
-        st.error(f"❌ Error in Tab 4 (Data Overview): {str(e)}")
+        st.error(f"❌ Error in Tab 4 (Data Overview): {e!s}")
         st.exception(e)
         import traceback
         with st.expander("🔍 Full Error Details", expanded=False):

@@ -3,19 +3,19 @@ Modal overlay component for file processing.
 Blocks UI and shows progress with time estimates.
 """
 
-import streamlit as st
 import time
-from typing import Optional, Callable
-from datetime import datetime, timedelta
+from collections.abc import Callable
+
+import streamlit as st
 
 
 def render_processing_modal(
     file_type: str,
     is_processing: bool,
-    on_cancel: Optional[Callable] = None,
+    on_cancel: Callable | None = None,
     status_message: str = "",
     progress_messages: list = None,
-    start_time: Optional[float] = None,
+    start_time: float | None = None,
     total_rows: int = 0,
     processed_rows: int = 0
 ):

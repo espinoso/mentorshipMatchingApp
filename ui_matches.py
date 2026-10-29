@@ -30,8 +30,8 @@ def render_matches_tab():
             st.stop()
             
         # Import after checks (to avoid any import issues blocking the message)
-        from utils import is_debug_mode
         from prompts import create_default_prompt
+        from utils import is_debug_mode
         
         mentees_df = st.session_state.get('mentees_df')
         mentors_df = st.session_state.get('mentors_df')
@@ -166,7 +166,7 @@ def render_matches_tab():
             st.info("💡 The processing will begin automatically when you open Tab 6.")
     
     except Exception as e:
-        st.error(f"❌ Error in Tab 5 (Generate Matches): {str(e)}")
+        st.error(f"❌ Error in Tab 5 (Generate Matches): {e!s}")
         st.exception(e)
         import traceback
         with st.expander("🔍 Full Error Details", expanded=False):

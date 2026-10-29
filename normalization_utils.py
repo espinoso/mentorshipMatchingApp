@@ -2,16 +2,16 @@
 Utility functions for file format detection and normalization integration.
 """
 
-import pandas as pd
-import streamlit as st
-from typing import Tuple, Optional, Dict, Any, Callable
-from io import BytesIO
-import tempfile
+import importlib.util
 import os
 import sys
-from pathlib import Path
-import importlib.util
+import tempfile
 import time
+from io import BytesIO
+from pathlib import Path
+
+import pandas as pd
+import streamlit as st
 
 from info import MENTEE_COLUMNS, MENTOR_COLUMNS
 
@@ -112,7 +112,7 @@ def load_normalization_modules():
     return shared_utils, normalization_module, institution_types
 
 
-def validate_pre_format_columns(df: pd.DataFrame, file_type: str) -> Tuple[bool, list]:
+def validate_pre_format_columns(df: pd.DataFrame, file_type: str) -> tuple[bool, list]:
     """
     Validate that file has required PRE format columns.
     
@@ -202,7 +202,6 @@ def create_streamlit_progress_handler(progress_placeholder, status_placeholder, 
         """Capture print statements and update Streamlit"""
         # Handle print with end=" " (same line) - check if end is in kwargs
         end_char = kwargs.get('end', '\n')
-        flush = kwargs.get('flush', False)
         
         # Join all arguments into message
         message = ' '.join(str(arg) for arg in args)
@@ -269,7 +268,7 @@ def process_file_with_progress(
     progress_container=None,
     status_container=None,
     cancel_flag=None
-) -> Tuple[Optional[pd.DataFrame], Optional[str], Optional[dict]]:
+) -> tuple[pd.DataFrame | None, str | None, dict | None]:
     """
     Process uploaded file with Streamlit progress tracking.
     
@@ -285,7 +284,6 @@ def process_file_with_progress(
         Tuple of (processed_df, output_file_path, processing_info)
         Returns (None, None, None) on error or cancellation
     """
-    import time
     start_time = time.time()
     
     try:
@@ -450,18 +448,18 @@ def process_file_with_progress(
                 
                 return processed_df, output_file, processing_info
                 
-            except Exception as e:
+            except Exception:
                 # Restore original print
                 builtins.print = original_print
-                raise e
+                raise
                 
-        except Exception as e:
+        except Exception:
             # Clean up temp file on error
             try:
                 os.unlink(temp_input_path)
             except:
                 pass
-            raise e
+            raise
             
     except Exception as e:
         import traceback

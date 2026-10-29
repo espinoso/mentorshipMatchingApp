@@ -4,7 +4,6 @@ Contains functions for creating charts, graphs, and visual representations of da
 """
 
 import plotly.graph_objects as go
-import pandas as pd
 
 
 def create_heatmap(matrix_df, assignments=None):
@@ -25,7 +24,7 @@ def create_heatmap(matrix_df, assignments=None):
         text=matrix_df.values,
         texttemplate='%{text}%',
         textfont={"size": 8},
-        colorbar=dict(title="Match %"),
+        colorbar={'title': "Match %"},
         hoverongaps=False,
         hovertemplate='<b>%{y}</b> → <b>%{x}</b><br>Match: %{z}%<extra></extra>'
     ))
@@ -37,14 +36,14 @@ def create_heatmap(matrix_df, assignments=None):
         for mentee_idx, mentee in enumerate(matrix_df.columns):
             for mentor_idx, mentor in enumerate(matrix_df.index):
                 if (mentee, mentor) in assignment_dict:
-                    shapes.append(dict(
-                        type="rect",
-                        x0=mentee_idx - 0.5,
-                        y0=mentor_idx - 0.5,
-                        x1=mentee_idx + 0.5,
-                        y1=mentor_idx + 0.5,
-                        line=dict(color="blue", width=3),
-                    ))
+                    shapes.append({
+                        'type': "rect",
+                        'x0': mentee_idx - 0.5,
+                        'y0': mentor_idx - 0.5,
+                        'x1': mentee_idx + 0.5,
+                        'y1': mentor_idx + 0.5,
+                        'line': {'color': "blue", 'width': 3},
+                    })
         
         fig.update_layout(shapes=shapes)
     
@@ -54,8 +53,8 @@ def create_heatmap(matrix_df, assignments=None):
         yaxis_title="Mentors",
         height=max(600, len(matrix_df) * 25),  # Dynamic height
         width=max(800, len(matrix_df.columns) * 30),  # Dynamic width
-        xaxis=dict(tickangle=-45),
-        font=dict(size=10)
+        xaxis={'tickangle': -45},
+        font={'size': 10}
     )
     
     return fig
