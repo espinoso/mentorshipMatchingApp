@@ -129,7 +129,11 @@ def _render_parse_report(report, expected_mentors, expected_mentees):
 
 MATRIX_MODEL = DEFAULT_MODEL  # defaults; the UI's st.session_state.model_choice overrides (see _model_choice)
 REASONING_MODEL = DEFAULT_MODEL
-REASONING_MAX_TOKENS = 8000
+# Opus's adaptive thinking is spent BEFORE the JSON and counts against max_tokens, so
+# every budget must leave generous room for it on top of the expected output — otherwise
+# a real-size matrix is truncated and the whole batch fails (caught live, not by mocks).
+THINKING_HEADROOM = 20000
+REASONING_MAX_TOKENS = 8000  # JSON floor; the actual reasoning budget scales with assignments
 MATRIX_MAX_OUTPUT_TOKENS = 120000  # headroom under Claude's 128K output cap
 
 
@@ -162,8 +166,8 @@ def _score_mentor_batch(mentees_df, mentor_batch_df) -> str:
         f"{prepare_data_for_assistant(None, mentor_batch_df)}\n\n"
         "Generate matches for ALL mentees in JSON format as specified."
     )
-    budget = int(estimate_output_tokens(len(mentor_batch_df), len(mentees_df)) * 1.5)
-    budget = max(4096, min(budget, MATRIX_MAX_OUTPUT_TOKENS))
+    budget = int(estimate_output_tokens(len(mentor_batch_df), len(mentees_df)) * 1.5) + THINKING_HEADROOM
+    budget = max(THINKING_HEADROOM, min(budget, MATRIX_MAX_OUTPUT_TOKENS))
     client = ClaudeClient(_model_choice(MATRIX_MODEL), _anthropic_key())
     return client.complete_json(system, user, max_tokens=budget, cache_system=True)
 
@@ -580,8 +584,12 @@ def get_reasoning_for_assignments(assignments, mentees_df, mentors_df):
 - Mentor experience: {ad['mentor_experience']} years
 """
 
+        reasoning_budget = min(
+            MATRIX_MAX_OUTPUT_TOKENS,
+            max(REASONING_MAX_TOKENS, len(assignments) * 150) + THINKING_HEADROOM,
+        )
         text = ClaudeClient(_model_choice(REASONING_MODEL), _anthropic_key()).complete_json(
-            system, user, max_tokens=REASONING_MAX_TOKENS
+            system, user, max_tokens=reasoning_budget
         )
         data = parse_json(text)
         entries = data.get("reasonings") if isinstance(data, dict) else data

@@ -89,6 +89,23 @@ def find_column_flexible(df: pd.DataFrame, search_terms: list[str]) -> str | Non
     return None
 
 
+def read_input_sheet(input_file: str) -> pd.DataFrame:
+    """Read a responses sheet, locating the header row.
+
+    These files sometimes carry one or more blank/metadata rows before the header
+    (e.g. the sample files have two), so a fixed ``header=1`` lands on a blank row and
+    yields unnamed columns. Sniff the first row that looks like the header; fall back to
+    the historical ``header=1`` if none is recognized."""
+    hints = ("code mentor", "code mentee", "field of expertise", "affiliation")
+    raw = pd.read_excel(input_file, header=None)
+    for i in range(min(8, len(raw))):
+        cells = raw.iloc[i].astype(str).str.lower()
+        if any(cells.str.contains(h, na=False).any() for h in hints):
+            df = pd.read_excel(input_file, header=i)
+            return df.dropna(axis=1, how="all").dropna(axis=0, how="all")
+    return pd.read_excel(input_file, header=1)
+
+
 def generate_output_filename(input_file: str, prefix: str = "POST_") -> str:
     """
     Generate output filename with prefix and timestamp.

@@ -21,6 +21,7 @@ from shared_utils import (
     find_column_flexible,
     find_missing_data,
     generate_output_filename,
+    read_input_sheet,
     setup_claude,
     validate_required_columns,
     write_error_log,
@@ -61,7 +62,7 @@ PRE_COLUMN_MAPPING = {
     'affiliation': ['affiliation'],
     'country': ['country of your affiliated institution'],
     'current_position': ['current position'],
-    'institution_type': ['type of work'],
+    'institution_type': ['type of institution', 'institution type'],
     'country_of_origin': ['country of origin'],
     'education_level': ['highest educational level', 'highest education level'],
     'alma_mater': ['institution & country where bachelor', 'bachelor\'s degree'],
@@ -299,9 +300,9 @@ def process_mentor_file(input_file: str, output_file: str = None, dry_run: bool 
     unmapped_alma_maters = []
     unmapped_fields = []
     
-    # Read the Excel file (handle header row)
+    # Read the Excel file (sniff the header row — files may have blank leading rows)
     print("\n1. Reading input file...")
-    df = pd.read_excel(input_file, header=1)  # Skip first row (usually metadata)
+    df = read_input_sheet(input_file)
     print(f"   ✓ Loaded {len(df)} rows")
     print(f"   ✓ Columns found: {len(df.columns)}")
     

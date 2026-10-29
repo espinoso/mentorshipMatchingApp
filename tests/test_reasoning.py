@@ -40,7 +40,9 @@ def test_valid_response_builds_keyed_dict(run):
     fake = _Fake(json.dumps({"reasonings": [{"mentee_id": "1", "mentor_id": "2", "reasoning": "Both biology."}]}))
     assert run(fake) == {("1", "2"): "Both biology."}
     assert fake.model == app.REASONING_MODEL
-    assert fake.calls[0]["max_tokens"] == 8000
+    # Budget scales with the assignment count and leaves room for Opus thinking (regression:
+    # a flat 8000 truncated large-cohort reasoning once thinking is counted).
+    assert fake.calls[0]["max_tokens"] >= app.THINKING_HEADROOM
     assert "1 → 2" in fake.calls[0]["user"]
 
 
