@@ -25,7 +25,7 @@ def render_overview_tab():
             st.markdown("""
             <div class="token-warning">
                 ⚠️ <strong>No data uploaded yet!</strong><br>
-                Go to <strong>Tab 2</strong> to upload your mentees and mentors files.
+                Go to the <strong>Upload</strong> step to upload your mentees and mentors files.
             </div>
             """, unsafe_allow_html=True)
             st.stop()
@@ -65,7 +65,7 @@ def render_overview_tab():
         """, unsafe_allow_html=True)
     
     except Exception as e:
-        st.error(f"❌ Error in Tab 4 (Data Overview): {e!s}")
+        st.error(f"❌ Error in Data Overview: {e!s}")
         st.exception(e)
         import traceback
         with st.expander("🔍 Full Error Details", expanded=False):

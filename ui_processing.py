@@ -102,6 +102,10 @@ def render_processing_tab():
     if st.session_state.get('start_processing', False):
         st.session_state.start_processing = False
         st.session_state.last_match_time = datetime.now()
+        # Drop any prior results so a failed/empty re-run can't re-display stale matches as if fresh.
+        st.session_state.matrix_df = None
+        st.session_state.assignments = None
+        st.session_state.matches = None
         
         # PRE-FLIGHT VALIDATION: Check for duplicate IDs before sending to AI
         if is_debug_mode():

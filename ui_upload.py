@@ -597,7 +597,7 @@ def render_upload_tab():
     if not st.session_state.api_key:
         render_html_card(
             "⚠️ <strong>API Key Required</strong><br>"
-            "Please set ANTHROPIC_API_KEY (see Tab 1) before uploading data files.",
+            "Please set ANTHROPIC_API_KEY (see the Configure step) before uploading data files.",
             "conflict-warning"
         )
         st.stop()
