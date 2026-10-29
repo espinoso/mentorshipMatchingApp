@@ -8,6 +8,8 @@ import numpy as np
 import pandas as pd
 from scipy.optimize import linear_sum_assignment
 
+from info import MENTEE_COLUMNS, MENTOR_COLUMNS
+
 MISSING_MENTEE_SCORE = 30  # AI omitted the pair: assume a poor match
 
 
@@ -175,3 +177,64 @@ def check_mentor_conflicts(matches: list[dict], max_mentees_per_mentor: int = 2)
         for mentor_id, assigned in mentor_assignments.items()
         if len(assigned) > max_mentees_per_mentor
     ]
+
+
+def _countries_by_id(df: pd.DataFrame, cols: dict) -> dict[str, str]:
+    """Map string ID -> country normalized with strip().lower() ("" when missing)."""
+    return {
+        str(i): "" if pd.isna(c) else str(c).strip().lower()
+        for i, c in zip(df[cols["id"]], df[cols["country"]], strict=True)
+    }
+
+
+def apply_country_restrictions(
+    matrix_df: pd.DataFrame,
+    mentees_df: pd.DataFrame,
+    mentors_df: pd.DataFrame,
+    avoid_same_country: bool = False,
+    countries: list[str] | None = None,
+) -> tuple[pd.DataFrame, list[dict]]:
+    """Zero mentor x mentee cells that share a country; returns (matrix copy, filtered cells).
+
+    `countries` (restrict only within those countries) wins over `avoid_same_country`.
+    With neither set the matrix is returned unchanged. A missing country column also returns
+    the matrix unchanged, with `[{"skipped": ...}]` as the report. Filtered cells are listed
+    only when their original score was > 0.
+    """
+    out = matrix_df.copy()
+    if MENTOR_COLUMNS["country"] not in mentors_df.columns:
+        return out, [{"skipped": "mentor country column missing"}]
+    if MENTEE_COLUMNS["country"] not in mentees_df.columns:
+        return out, [{"skipped": "mentee country column missing"}]
+    if countries is None and not avoid_same_country:
+        return out, []
+
+    named = {c.strip().lower() for c in countries} if countries is not None else None
+    mentor_c = _countries_by_id(mentors_df, MENTOR_COLUMNS)
+    mentee_c = _countries_by_id(mentees_df, MENTEE_COLUMNS)
+    reason = (
+        f"Same-country restriction ({', '.join(sorted(named))})"
+        if named is not None
+        else "Same-country restriction"
+    )
+
+    filtered: list[dict] = []
+    for mentor_id in out.index:
+        mc = mentor_c.get(str(mentor_id), "")
+        if not mc or (named is not None and mc not in named):
+            continue
+        for mentee_id in out.columns:
+            if mentee_c.get(str(mentee_id), "") != mc:
+                continue
+            score = out.loc[mentor_id, mentee_id]
+            out.loc[mentor_id, mentee_id] = 0
+            if pd.notna(score) and score > 0:
+                filtered.append(
+                    {
+                        "mentor_id": str(mentor_id),
+                        "mentee_id": str(mentee_id),
+                        "original_score": float(score),
+                        "reason": reason,
+                    }
+                )
+    return out, filtered
