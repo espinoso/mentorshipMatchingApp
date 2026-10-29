@@ -282,56 +282,42 @@ def estimate_output_tokens(num_mentors: int, num_mentees: int) -> int:
     # Based on actual usage: 9,458 / (15 × 62) = 10.17 tokens per pair
     return 10 * num_mentees * num_mentors
 
+# Safe cap on estimated OUTPUT tokens per batch, with headroom under Claude's 128K output cap.
+MATRIX_OUTPUT_CAP = 100000
+
+
 def calculate_optimal_batch_size(
     total_mentors: int,
     num_mentees: int,
-    model: str,
+    model: str = None,
     use_stateful: bool = False,
     safety_margin: float = 0.90
 ) -> int:
     """
-    Calculate optimal batch size based on TPM (Tokens Per Minute) limits.
-    
-    Strategy:
-    1. Calculate tokens per batch (input + output)
-    2. Ensure batch fits within TPM limit (with safety margin)
-    3. Maximize batch size for efficiency (fewer API calls)
-    
+    Largest mentor batch whose estimated OUTPUT tokens stay under MATRIX_OUTPUT_CAP.
+
+    With Claude, input is no longer the constraint (huge context + prompt caching); the 128K
+    output cap is. Estimated output is ~15 tokens per mentor-mentee pair (the 10/pair of
+    estimate_output_tokens plus the 1.5x headroom the matrix call budgets with).
+
     Args:
         total_mentors: Total number of mentors to process
         num_mentees: Total number of mentees
-        model: Model name (e.g., 'gpt-5.1')
-        use_stateful: Whether stateful mode is enabled
-        safety_margin: Fraction of TPM to use (0.90 = 90% of limit, allows up to ~27k tokens for 30k TPM)
-    
+        model, use_stateful, safety_margin: accepted for backward-compatible call sites; ignored.
+
     Returns:
         Optimal batch size (number of mentors per batch)
     """
-    model_config = get_model_config(model)
-    tpm_limit = model_config.get('tpm_limit', 30000)  # Default fallback
-    usable_tpm = int(tpm_limit * safety_margin)
-    
-    # Try different batch sizes, starting from high and going down
-    # This maximizes efficiency (fewer API calls)
-    for batch_size in range(min(30, total_mentors), 4, -1):
-        # Estimate tokens for this batch
-        if use_stateful:
-            # First batch is expensive (full context)
-            # Subsequent batches are cheap (only new mentors)
-            # We'll optimize for subsequent batches (more common)
-            input_tokens = estimate_input_tokens_stateful_subsequent(batch_size)
-        else:
-            input_tokens = estimate_input_tokens_stateless(batch_size, num_mentees)
-        
-        output_tokens = estimate_output_tokens(batch_size, num_mentees)
-        total_tokens = input_tokens + output_tokens
-        
-        # Check if this batch size fits within TPM limit
-        if total_tokens <= usable_tpm:
+    if num_mentees <= 0:
+        return min(30, max(total_mentors, 1))
+
+    # Try from high to low; return the largest batch whose estimated output fits.
+    for batch_size in range(min(30, total_mentors), 0, -1):
+        if int(estimate_output_tokens(batch_size, num_mentees) * 1.5) <= MATRIX_OUTPUT_CAP:
             return batch_size
-    
-    # Fallback to minimum safe batch size
-    return 5
+
+    # Even one mentor overflows the cap (enormous cohort): one mentor per batch is the floor.
+    return 1
 
 def estimate_batch_tokens(
     num_mentors: int,
