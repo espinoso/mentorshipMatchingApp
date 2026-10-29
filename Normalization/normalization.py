@@ -1382,7 +1382,7 @@ def normalize_mentor_field_of_expertise(field: str, client=None, cache=None,
     
     Args:
         field: Original field of expertise value
-        client: OpenAI client (for AI fallback)
+        client: ClaudeClient (for AI fallback)
         cache: AI cache instance
         row_num: Row number for logging
         log_unmapped: Optional list to log unmapped fields
@@ -1510,21 +1510,14 @@ Return only the broad field category:"""
             else:
                 MAX_RETRIES = 3
                 RETRY_DELAY = 2
-                MODEL = "gpt-4o-mini"
                 
                 for attempt in range(MAX_RETRIES):
                     try:
-                        response = client.chat.completions.create(
-                            model=MODEL,
-                            messages=[
-                                {"role": "system", "content": "You only return a single broad academic/professional field category. Maximum 3 words. Proper capitalization."},
-                                {"role": "user", "content": prompt}
-                            ],
-                            temperature=0.2,
-                            max_tokens=20
-                        )
-                        
-                        broad_category = response.choices[0].message.content.strip()
+                        broad_category = client.complete_text(
+                            "You only return a single broad academic/professional field category. Maximum 3 words. Proper capitalization.",
+                            prompt,
+                            max_tokens=20,
+                        ).strip()
                         broad_category = broad_category.strip('."\'')
                         cache.set(cache_key, broad_category)
                         break

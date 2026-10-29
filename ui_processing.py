@@ -77,7 +77,6 @@ def render_processing_tab():
     
     # Use the api_key from session state
     api_key = st.session_state.api_key
-    model_choice = st.session_state.model_choice
     
     ready = (
         st.session_state.mentees_df is not None and
@@ -164,9 +163,6 @@ def render_processing_tab():
                 </div>
                 """, unsafe_allow_html=True)
             
-            # Get stateful mode setting
-            use_stateful = st.session_state.get('use_stateful_mode', False)
-            
             # Import API functions from app.py (will be moved to api_client.py later)
             from app import generate_matrix_in_batches, get_reasoning_for_assignments
             
@@ -176,10 +172,7 @@ def render_processing_tab():
             matrix_df = generate_matrix_in_batches(
                 st.session_state.mentees_df,
                 st.session_state.mentors_df,
-                api_key,
-                model_choice,
                 batch_size=batch_size,  # None = auto-calculate
-                use_stateful=use_stateful
             )
             
             if matrix_df is not None:
@@ -253,8 +246,6 @@ def render_processing_tab():
                     assignments,
                     st.session_state.mentees_df,
                     st.session_state.mentors_df,
-                    api_key,
-                    model_choice
                 )
             
                 # Convert to old format for compatibility with display code

@@ -5,6 +5,8 @@ Shows a summary of all settings and data before generating matches
 
 import streamlit as st
 
+from info import DEFAULT_MODEL
+
 
 def render_matches_tab():
     """Render Tab 6: Generate Matches Summary"""
@@ -44,37 +46,31 @@ def render_matches_tab():
         # Calculate optimal batch size if we have all data
         batch_size = st.session_state.get('batch_size', 15)
         batch_info = None
+        est_cost = None
         if mentees_df is not None and mentors_df is not None and st.session_state.get('api_key'):
-            from utils import calculate_optimal_batch_size, estimate_batch_tokens, get_model_config
-            model = st.session_state.get('model_choice', 'gpt-5.1')
-            use_stateful = st.session_state.get('use_stateful_mode', False)
+            from utils import calculate_optimal_batch_size, estimate_api_cost, estimate_batch_tokens
             batch_size = calculate_optimal_batch_size(
                 total_mentors=mentor_count,
                 num_mentees=mentee_count,
-                model=model,
-                use_stateful=use_stateful
             )
             st.session_state.batch_size = batch_size
             
             # Calculate batch details for display
-            model_config = get_model_config(model)
-            tpm_limit = model_config.get('tpm_limit', 30000)
-            input_tokens, output_tokens = estimate_batch_tokens(
-                batch_size, mentee_count, model, use_stateful, is_first_batch=True
-            )
+            input_tokens, output_tokens = estimate_batch_tokens(batch_size, mentee_count)
             total_tokens = input_tokens + output_tokens
             num_batches = int((mentor_count + batch_size - 1) / batch_size)
             
             batch_info = {
                 'batch_size': batch_size,
                 'num_batches': num_batches,
-                'tpm_limit': tpm_limit,
-                'usable_tpm': int(tpm_limit * 0.90),
                 'input_tokens': input_tokens,
                 'output_tokens': output_tokens,
                 'total_tokens': total_tokens,
-                'mode': 'Stateful' if use_stateful else 'Stateless'
             }
+            # Upper bound: ignores prompt-cache discounts and assumes every batch is full.
+            est_cost = num_batches * estimate_api_cost(
+                input_tokens, output_tokens, st.session_state.get('model_choice', DEFAULT_MODEL)
+            )
         
         st.markdown(f"""
         <div class="info-card">
@@ -84,8 +80,6 @@ def render_matches_tab():
         """, unsafe_allow_html=True)
         
         # Compact summary layout
-        use_stateful = st.session_state.get('use_stateful_mode', False)
-        stateful_status = "Enabled" if use_stateful else "Disabled"
         default_prompt = create_default_prompt()
         custom_prompt = st.session_state.get('custom_prompt', default_prompt)
         is_custom = custom_prompt != default_prompt
@@ -93,7 +87,7 @@ def render_matches_tab():
         # Compact summary in columns
         col1, col2, col3, col4 = st.columns(4)
         with col1:
-            st.metric("🤖 Model", st.session_state.get('model_choice', 'gpt-5.1'))
+            st.metric("🤖 Model", st.session_state.get('model_choice', DEFAULT_MODEL))
         with col2:
             st.metric("📦 Batch Size", batch_size)
         with col3:
@@ -105,7 +99,7 @@ def render_matches_tab():
         with col1:
             st.metric("📈 Evaluations", f"{total_evaluations:,}")
         with col2:
-            st.metric("🔗 Stateful", stateful_status)
+            st.metric("💰 Est. max cost", f"${est_cost:,.2f}" if est_cost is not None else "n/a")
         with col3:
             prompt_status = "Custom" if is_custom else "Default"
             st.metric("🔧 Prompt", prompt_status)
@@ -130,17 +124,14 @@ def render_matches_tab():
             if is_debug_mode():
                 with st.expander("ℹ️ Batch Size Calculation Details", expanded=False):
                     st.markdown(f"""
-                    **Auto-optimized batch size** based on model rate limits:
+                    **Auto-optimized batch size** so each batch's output stays under Claude's 128K output cap:
                     
-                    - **Model TPM Limit**: {batch_info['tpm_limit']:,} tokens/minute
-                    - **Safety Margin**: 90% of limit = {batch_info['usable_tpm']:,} usable tokens
                     - **Estimated Tokens per Batch**: 
                       - Input: {batch_info['input_tokens']:,} tokens
                       - Output: {batch_info['output_tokens']:,} tokens
                       - **Total**: {batch_info['total_tokens']:,} tokens
-                    - **Processing Mode**: {batch_info['mode']}
                     
-                    This ensures batches fit within rate limits while maximizing efficiency.
+                    Prompt caching reuses the mentee data across batches automatically.
                     """)
         elif mentees_df is not None and mentors_df is not None:
             st.divider()

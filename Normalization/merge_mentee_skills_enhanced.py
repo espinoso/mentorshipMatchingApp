@@ -4,12 +4,10 @@ Transforms PRE format to POST format with full automation.
 """
 
 import argparse
-import json
 import os
 import sys
 import time
 
-import openai
 import pandas as pd
 
 # Import shared utilities
@@ -20,9 +18,12 @@ from shared_utils import (
     find_column_flexible,
     find_missing_data,
     generate_output_filename,
+    setup_claude,
     validate_required_columns,
     write_error_log,
 )
+
+from llm_client import LLMError, parse_json
 
 # Import normalization utilities
 from normalization import (
@@ -34,7 +35,6 @@ from normalization import (
 )
 
 # Configuration
-MODEL = "gpt-4o-mini"
 MAX_RETRIES = 3
 RETRY_DELAY = 2  # seconds
 
@@ -69,20 +69,9 @@ PRE_COLUMN_MAPPING = {
 }
 
 
-def setup_openai():
-    """Setup OpenAI API key from environment variable"""
-    api_key = os.getenv('OPENAI_API_KEY')
-    if not api_key:
-        api_key = input("Please enter your OpenAI API key: ").strip()
-        os.environ['OPENAI_API_KEY'] = api_key
-    
-    openai.api_key = api_key
-    return openai
-
-
 def normalize_education_level(education_level: str, client, cache: AICache, row_num: int) -> str:
     """
-    Use OpenAI to normalize education level to one of: Masters, PhD, High School, Bachelors
+    Use Claude to normalize education level to one of: Masters, PhD, High School, Bachelors
     With caching support.
     """
     if pd.isna(education_level):
@@ -111,17 +100,11 @@ Return ONLY one of the four standardized values above, nothing else. If it's a M
 
     for attempt in range(MAX_RETRIES):
         try:
-            response = client.chat.completions.create(
-                model=MODEL,
-                messages=[
-                    {"role": "system", "content": "You only return one of these exact words: Masters, PhD, High School, Bachelors. Nothing else."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.1,
-                max_tokens=10
-            )
-            
-            result = response.choices[0].message.content.strip()
+            result = client.complete_text(
+                "You only return one of these exact words: Masters, PhD, High School, Bachelors. Nothing else.",
+                prompt,
+                max_tokens=10,
+            ).strip()
             
             # Validate the result
             valid_values = ["Masters", "PhD", "High School", "Bachelors"]
@@ -144,7 +127,7 @@ Return ONLY one of the four standardized values above, nothing else. If it's a M
 
 def split_current_education_program(program: str, client, cache: AICache, row_num: int) -> tuple[str, str]:
     """
-    Use OpenAI to split current education program into level and specialization
+    Use Claude to split current education program into level and specialization
     Returns: (level, specialization) where level is one of: PhD, Masters, Bachelors
     With caching support.
     """
@@ -184,21 +167,15 @@ Examples:
 
     for attempt in range(MAX_RETRIES):
         try:
-            response = client.chat.completions.create(
-                model=MODEL,
-                messages=[
-                    {"role": "system", "content": "You only return valid JSON with 'level' and 'specialization' keys. Level must be PhD, Masters, or Bachelors."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.1,
-                max_tokens=100
-            )
-            
-            result = response.choices[0].message.content.strip()
+            result = client.complete_text(
+                "You only return valid JSON with 'level' and 'specialization' keys. Level must be PhD, Masters, or Bachelors.",
+                prompt,
+                max_tokens=100,
+            ).strip()
             
             # Parse JSON
             try:
-                parsed = json.loads(result)
+                parsed = parse_json(result)
                 level = parsed.get("level", "ERROR")
                 specialization = parsed.get("specialization", "ERROR: No specialization found")
                 
@@ -208,7 +185,7 @@ Examples:
                 print(f"Row {row_num}: Split program into Level='{level}', Specialization='{specialization}'")
                 return level, specialization
                 
-            except json.JSONDecodeError:
+            except LLMError:
                 print(f"Row {row_num}: Failed to parse JSON response: {result}")
                 if attempt < MAX_RETRIES - 1:
                     continue
@@ -229,7 +206,7 @@ Examples:
 def determine_broad_field_of_expertise(original_field: str, extracted_specialization: str, 
                                        client, cache: AICache, row_num: int) -> str:
     """
-    Use OpenAI to determine a broad field of expertise category
+    Use Claude to determine a broad field of expertise category
     With caching support.
     """
     # Handle empty values
@@ -267,17 +244,11 @@ Return only the broad field category:"""
 
     for attempt in range(MAX_RETRIES):
         try:
-            response = client.chat.completions.create(
-                model=MODEL,
-                messages=[
-                    {"role": "system", "content": "You only return a single broad academic/professional field category. Maximum 3 words. Proper capitalization."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.2,
-                max_tokens=20
-            )
-            
-            result = response.choices[0].message.content.strip()
+            result = client.complete_text(
+                "You only return a single broad academic/professional field category. Maximum 3 words. Proper capitalization.",
+                prompt,
+                max_tokens=20,
+            ).strip()
             result = result.strip('."\'')
             
             # Cache result
@@ -298,7 +269,7 @@ Return only the broad field category:"""
 def merge_and_normalize_skills(field_of_expertise: str, extracted_specialization: str, 
                                specialization: str, hard_skills: str, client, cache: AICache, row_num: int) -> str:
     """
-    Use OpenAI to merge and normalize skills from all four sources
+    Use Claude to merge and normalize skills from all four sources
     With caching support.
     """
     # Handle empty values
@@ -347,17 +318,11 @@ Now process the fields above and return only the normalized comma-separated list
     # Make API call with retry logic
     for attempt in range(MAX_RETRIES):
         try:
-            response = client.chat.completions.create(
-                model=MODEL,
-                messages=[
-                    {"role": "system", "content": "You are a precise skills normalization assistant. You only return comma-separated keyword lists, nothing else."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.3,
-                max_tokens=500
-            )
-            
-            result = response.choices[0].message.content.strip()
+            result = client.complete_text(
+                "You are a precise skills normalization assistant. You only return comma-separated keyword lists, nothing else.",
+                prompt,
+                max_tokens=500,
+            ).strip()
             
             # Clean up the result (remove any extra formatting)
             result = result.replace('\n', ' ').replace('  ', ' ').strip()
@@ -409,12 +374,12 @@ def process_mentee_file(input_file: str, output_file: str = None, dry_run: bool 
         output_file: Path to output POST file (auto-generated if None)
         dry_run: If True, don't write output file
         test_rows: If set, only process first N rows
-        client: OpenAI client
+        client: ClaudeClient (see shared_utils.setup_claude)
         cache: AI cache instance
         report: Transformation report instance
     """
     if client is None:
-        client = setup_openai()
+        client = setup_claude()
     if cache is None:
         cache = AICache()
     if report is None:
@@ -750,8 +715,8 @@ def main():
         print(f"\n⚠ TEST MODE: Processing only first {args.test_rows} rows")
     
     # Setup
-    print("\n0. Setting up OpenAI API...")
-    client = setup_openai()
+    print("\n0. Setting up Claude API...")
+    client = setup_claude()
     cache = AICache()
     report = TransformationReport("Mentee Skills Merger")
     print("   ✓ API key configured")

@@ -233,14 +233,14 @@ def clean_text_for_csv(df):
 
 def prepare_data_for_assistant(mentees_df, mentors_df):
     """Prepare data with ALL columns for comprehensive matching
-    
+
     Args:
-        mentees_df: DataFrame of mentees (None to skip mentees section for stateful subsequent batches)
-        mentors_df: DataFrame of mentors
+        mentees_df: DataFrame of mentees (None to emit a mentors-only block)
+        mentors_df: DataFrame of mentors (None to emit a mentees-only block, e.g. the cached system prompt)
     """
-    
+
     combined_data = "# MENTORSHIP MATCHING DATA\n\n"
-    
+
     if mentees_df is not None:
         mentees_full = mentees_df.copy()
         mentees_cleaned = clean_text_for_csv(mentees_full)
@@ -249,13 +249,14 @@ def prepare_data_for_assistant(mentees_df, mentors_df):
         combined_data += f"All columns included: {', '.join(mentees_cleaned.columns.tolist())}\n\n"
         combined_data += mentees_cleaned.to_csv(index=False)
         combined_data += "\n"
-    
-    mentors_full = mentors_df.copy()
-    mentors_cleaned = clean_text_for_csv(mentors_full)
-    combined_data += "## AVAILABLE MENTORS (ALL DATA)\n"
-    combined_data += f"Total mentors: {len(mentors_cleaned)}\n"
-    combined_data += f"All columns included: {', '.join(mentors_cleaned.columns.tolist())}\n\n"
-    combined_data += mentors_cleaned.to_csv(index=False)
-    
+
+    if mentors_df is not None:
+        mentors_full = mentors_df.copy()
+        mentors_cleaned = clean_text_for_csv(mentors_full)
+        combined_data += "## AVAILABLE MENTORS (ALL DATA)\n"
+        combined_data += f"Total mentors: {len(mentors_cleaned)}\n"
+        combined_data += f"All columns included: {', '.join(mentors_cleaned.columns.tolist())}\n\n"
+        combined_data += mentors_cleaned.to_csv(index=False)
+
     return combined_data
 

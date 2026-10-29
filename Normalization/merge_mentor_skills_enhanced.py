@@ -4,12 +4,10 @@ Transforms PRE format to POST format with full automation.
 """
 
 import argparse
-import json
 import os
 import sys
 import time
 
-import openai
 import pandas as pd
 
 # Import institution type normalization
@@ -23,9 +21,12 @@ from shared_utils import (
     find_column_flexible,
     find_missing_data,
     generate_output_filename,
+    setup_claude,
     validate_required_columns,
     write_error_log,
 )
+
+from llm_client import LLMError, parse_json
 
 # Import normalization utilities
 from normalization import (
@@ -36,7 +37,6 @@ from normalization import (
 )
 
 # Configuration
-MODEL = "gpt-4o-mini"
 MAX_RETRIES = 3
 RETRY_DELAY = 2  # seconds
 
@@ -71,17 +71,6 @@ PRE_COLUMN_MAPPING = {
     'experience_years': ['years of professional experience'],
     'career_dev_experience': ['areas where you feel comfortable mentoring', 'comfortable mentoring']
 }
-
-
-def setup_openai():
-    """Setup OpenAI API key from environment variable"""
-    api_key = os.getenv('OPENAI_API_KEY')
-    if not api_key:
-        api_key = input("Please enter your OpenAI API key: ").strip()
-        os.environ['OPENAI_API_KEY'] = api_key
-    
-    openai.api_key = api_key
-    return openai
 
 
 def extract_education_level_and_field(education_text: str, client, cache: AICache, row_num: int) -> tuple[str, str]:
@@ -127,21 +116,15 @@ Examples:
 
     for attempt in range(MAX_RETRIES):
         try:
-            response = client.chat.completions.create(
-                model=MODEL,
-                messages=[
-                    {"role": "system", "content": "You only return valid JSON with 'level' and 'field' keys. Level must be PhD, Masters, or Bachelors."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.1,
-                max_tokens=150
-            )
-            
-            result = response.choices[0].message.content.strip()
+            result = client.complete_text(
+                "You only return valid JSON with 'level' and 'field' keys. Level must be PhD, Masters, or Bachelors.",
+                prompt,
+                max_tokens=150,
+            ).strip()
             
             # Parse JSON
             try:
-                parsed = json.loads(result)
+                parsed = parse_json(result)
                 level = parsed.get("level", "ERROR")
                 field = parsed.get("field", "ERROR: No field found")
                 
@@ -151,7 +134,7 @@ Examples:
                 print(f"Row {row_num}: Extracted Level='{level}', Field='{field}'")
                 return level, field
                 
-            except json.JSONDecodeError:
+            except LLMError:
                 print(f"Row {row_num}: Failed to parse JSON response: {result}")
                 if attempt < MAX_RETRIES - 1:
                     continue
@@ -172,7 +155,7 @@ Examples:
 def merge_and_normalize_skills(extracted_field: str, original_institution_type: str,
                                specialization: str, hard_skills: str, client, cache, row_num: int) -> str:
     """
-    Use OpenAI to merge and normalize skills from four sources:
+    Use Claude to merge and normalize skills from four sources:
     1. Extracted field from education level
     2. Original institution type (if it was transformed)
     3. Specialization column
@@ -242,17 +225,11 @@ Now process the fields above and return only the normalized comma-separated list
     # Make API call with retry logic
     for attempt in range(MAX_RETRIES):
         try:
-            response = client.chat.completions.create(
-                model=MODEL,
-                messages=[
-                    {"role": "system", "content": "You are a precise skills normalization assistant. You only return comma-separated keyword lists, nothing else."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.3,
-                max_tokens=500
-            )
-            
-            result = response.choices[0].message.content.strip()
+            result = client.complete_text(
+                "You are a precise skills normalization assistant. You only return comma-separated keyword lists, nothing else.",
+                prompt,
+                max_tokens=500,
+            ).strip()
             
             # Clean up the result (remove any extra formatting)
             result = result.replace('\n', ' ').replace('  ', ' ').strip()
@@ -304,12 +281,12 @@ def process_mentor_file(input_file: str, output_file: str = None, dry_run: bool 
         output_file: Path to output POST file (auto-generated if None)
         dry_run: If True, don't write output file
         test_rows: If set, only process first N rows
-        client: OpenAI client
+        client: ClaudeClient (see shared_utils.setup_claude)
         cache: AI cache instance
         report: Transformation report instance
     """
     if client is None:
-        client = setup_openai()
+        client = setup_claude()
     if cache is None:
         cache = AICache()
     if report is None:
@@ -670,8 +647,8 @@ def main():
         print(f"\n⚠ TEST MODE: Processing only first {args.test_rows} rows")
     
     # Setup
-    print("\n0. Setting up OpenAI API...")
-    client = setup_openai()
+    print("\n0. Setting up Claude API...")
+    client = setup_claude()
     cache = AICache()
     report = TransformationReport("Mentor Skills Merger")
     print("   ✓ API key configured")
