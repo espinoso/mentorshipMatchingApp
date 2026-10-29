@@ -2,6 +2,12 @@
 line-length = 100
 target-version = "py311"
 
+[tool.ruff.lint]
+# Disable isort (I): import-ordering is a style rule whose first-party detection
+# differs between the Linux CI runner and local macOS, so it flagged inconsistently.
+# Correctness/quality rules stay on (strict for new files).
+ignore = ["I"]
+
 # Deferred legacy cleanup: the pre-revamp modules below carry stylistic or defensive
 # findings (blind/bare excepts, implicit Optional, unused unpacked vars, etc.) that are
 # not bugs. Remove entries as each module is rewritten. New files get no ignores.
