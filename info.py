@@ -33,132 +33,56 @@ MENTEE_COLUMNS = {
 }
 
 # =====================================================================
-# MODEL CONFIGURATION
-# Configuration for different OpenAI model families
+# MODEL CONFIGURATION (Claude)
+# CLAUDE_MODELS are the user-selectable matrix/reasoning models; Haiku is
+# used internally by normalization and is not offered in the selector.
 # =====================================================================
 
+CLAUDE_MODELS = ["claude-opus-5-5", "claude-sonnet-5-5"]
+DEFAULT_MODEL = "claude-opus-5-5"
+
 MODEL_CONFIGS = {
-    'gpt-5.1': {
-        'supports_temperature': True,
-        'supports_top_p': True,
-        'supports_structured_output': True,
-        'supports_stateful': False,  # Disabled per user request (high rate limits)
-        'token_param': 'max_output_tokens',
-        'family': 'gpt-5-full',
-        'tpm_limit': 30000,  # Tokens per minute
-        'rpm_limit': 500,    # Requests per minute
-        'tpd_limit': 900000  # Tokens per day
+    'claude-opus-5-5': {
+        'family': 'opus',
+        'quality': 'Best',
+        'speed': 'Slower',
+        'max_output_tokens': 128000,
     },
-    'gpt-5-mini': {
-        'supports_temperature': False,
-        'supports_top_p': False,
-        'supports_structured_output': False,  # Reasoning model - no structured JSON schema support
-        'supports_stateful': True,
-        'is_reasoning_model': True,  # Returns ResponseReasoningItem, not standard text
-        'token_param': 'max_output_tokens',
-        'family': 'gpt-5-mini',
-        'tpm_limit': 500000,
-        'rpm_limit': 500,
-        'tpd_limit': 5000000
+    'claude-sonnet-5-5': {
+        'family': 'sonnet',
+        'quality': 'Excellent',
+        'speed': 'Faster',
+        'max_output_tokens': 128000,
     },
-    'gpt-5-nano': {
-        'supports_temperature': False,
-        'supports_top_p': False,
-        'supports_structured_output': False,  # Reasoning model - no structured JSON schema support
-        'supports_stateful': True,
-        'is_reasoning_model': True,  # Returns ResponseReasoningItem, not standard text
-        'token_param': 'max_output_tokens',
-        'family': 'gpt-5-nano',
-        'tpm_limit': 200000,
-        'rpm_limit': 500,
-        'tpd_limit': 2000000
+    'claude-haiku-5-5': {
+        'family': 'haiku',
+        'quality': 'Good',
+        'speed': 'Fastest',
+        'max_output_tokens': 128000,
     },
-    'gpt-4.1': {
-        'supports_temperature': True,
-        'supports_top_p': True,
-        'supports_structured_output': True,
-        'supports_stateful': False,  # Disabled per user request (high rate limits)
-        'token_param': 'max_output_tokens',
-        'family': 'gpt-4.1-full',
-        'tpm_limit': 30000,
-        'rpm_limit': 500,
-        'tpd_limit': 900000
-    },
-    'gpt-4.1-mini': {
-        'supports_temperature': True,
-        'supports_top_p': True,
-        'supports_structured_output': True,
-        'supports_stateful': True,
-        'token_param': 'max_output_tokens',
-        'family': 'gpt-4.1-mini',
-        'tpm_limit': 200000,
-        'rpm_limit': 500,
-        'tpd_limit': 2000000
-    },
-    'gpt-4.1-nano': {
-        'supports_temperature': True,
-        'supports_top_p': True,
-        'supports_structured_output': True,
-        'supports_stateful': True,
-        'token_param': 'max_output_tokens',
-        'family': 'gpt-4.1-nano',
-        'tpm_limit': 200000,
-        'rpm_limit': 500,
-        'tpd_limit': 2000000
-    },
-    'default': {
-        'supports_temperature': False,  # Conservative default
-        'supports_top_p': False,  # Conservative default
-        'supports_structured_output': True,
-        'supports_stateful': True,
-        'token_param': 'max_output_tokens',
-        'family': 'unknown',
-        'tpm_limit': 30000,  # Conservative default
-        'rpm_limit': 500,
-        'tpd_limit': 900000
-    }
 }
 
 # =====================================================================
 # MODEL TOKEN LIMITS
-# Maximum tokens per model for validation
+# Context window per model. Output is capped separately at 128K tokens
+# (see MODEL_CONFIGS[...]['max_output_tokens']).
 # =====================================================================
 
 MODEL_TOKEN_LIMITS = {
-    "gpt-4o": 128000,
-    "gpt-4o-mini": 128000,
-    "o1-preview": 128000,
-    "o1-mini": 128000,
-    "o3-mini": 200000,
-    "gpt-4-turbo": 128000,
-    "gpt-4-turbo-preview": 128000,
-    "gpt-4": 8192,
-    "gpt-3.5-turbo": 16384,
-    "gpt-5": 200000,
-    "gpt-5.1": 200000,
-    "gpt-5.1-mini": 200000,
-    "gpt-5-mini": 200000,
-    "gpt-5-nano": 128000,
-    "gpt-5.1-reasoning": 200000,
-    "chatgpt-4o-latest": 128000,
+    "claude-opus-5-5": 1_000_000,
+    "claude-sonnet-5-5": 1_000_000,
+    "claude-haiku-5-5": 1_000_000,
 }
 
 # =====================================================================
 # API PRICING
-# Pricing per 1M tokens (source: https://openai.com/api/pricing/)
+# USD per 1M tokens (Claude)
 # =====================================================================
 
 API_PRICING = {
-    "gpt-4o": {"prompt": 2.50, "completion": 10.00},
-    "gpt-4o-mini": {"prompt": 0.15, "completion": 0.60},
-    "o1-preview": {"prompt": 15.00, "completion": 60.00},
-    "o1-mini": {"prompt": 3.00, "completion": 12.00},
-    "gpt-4-turbo": {"prompt": 10.00, "completion": 30.00},
-    "gpt-4-turbo-preview": {"prompt": 10.00, "completion": 30.00},
-    "gpt-4": {"prompt": 30.00, "completion": 60.00},
-    "gpt-3.5-turbo": {"prompt": 0.50, "completion": 1.50},
-    "gpt-5": {"prompt": 20.00, "completion": 60.00},
-    "gpt-5.1": {"prompt": 20.00, "completion": 60.00},
+    "claude-opus-5-5": {"prompt": 4.00, "completion": 20.00},
+    "claude-sonnet-5-5": {"prompt": 2.00, "completion": 10.00},
+    "claude-haiku-5-5": {"prompt": 0.10, "completion": 0.50},
 }
 
 # =====================================================================
@@ -180,17 +104,6 @@ RELATED_FIELD_GROUPS = [
     {'immunology', 'microbiology', 'virology'},
     {'pharmacology', 'pharmacy', 'pharmaceutical sciences'},
 ]
-
-# =====================================================================
-# EXCLUDED MODEL PREFIXES
-# Model prefixes to filter out (non-chat models)
-# =====================================================================
-
-EXCLUDED_MODEL_PREFIXES = (
-    'text-embedding-', 'embedding-', 
-    'tts-', 'whisper-', 
-    'dall-e-', 'davinci-', 'curie-', 'babbage-', 'ada-'
-)
 
 # =====================================================================
 # PROMPT TEMPLATES

@@ -31,7 +31,7 @@ def run(monkeypatch):
         monkeypatch.setattr(app, "_anthropic_key", lambda: "k")
         mentees = pd.DataFrame({"Mentee ID": [1], "Field": ["Bio"]})
         mentors = pd.DataFrame({"Mentor ID": [2], "Field": ["Bio"]})
-        return app.get_reasoning_for_assignments([("1", "2", 90)], mentees, mentors, None)
+        return app.get_reasoning_for_assignments([("1", "2", 90)], mentees, mentors)
 
     return _run
 

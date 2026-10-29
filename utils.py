@@ -2,11 +2,11 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 import tiktoken
-from openai import OpenAI
 
 from info import (
     API_PRICING,
-    EXCLUDED_MODEL_PREFIXES,
+    CLAUDE_MODELS,
+    DEFAULT_MODEL,
     MENTEE_COLUMNS,
     MENTOR_COLUMNS,
     MODEL_CONFIGS,
@@ -93,125 +93,22 @@ def estimate_tokens(text: str, model: str = "gpt-4") -> int:
     
     return len(encoding.encode(text))    
 
-def fetch_available_models(api_key: str):
-    """
-    Fetch available models from OpenAI API dynamically
-    Returns a dict of model_id -> model_info
-    """
-    try:
-        client = OpenAI(api_key=api_key)
-        # Try to list models - this may fail with Responses API, so we have fallback
-        try:
-            models = client.models.list()
-        except Exception as list_error:
-            # If models.list() fails (e.g., Responses API doesn't support it), use fallback
-            raise Exception(f"Models API not available: {list_error!s}")
-        
-        # Filter out non-chat models (embeddings, TTS, whisper, etc.)
-        # Include all chat/completion models (gpt-*, o1-*, o3-*, chatgpt-*, etc.)
-        available_models = {}
-        
-        for model in models.data:
-            model_id = model.id
-            
-            if any(model_id.startswith(prefix) for prefix in EXCLUDED_MODEL_PREFIXES):
-                continue
-            
-            if any(keyword in model_id.lower() for keyword in ['embed', 'whisper', 'tts', 'dall-e']):
-                continue
-            
-            quality = "Good"
-            speed = "Medium"
-            cost_estimate = "Variable"
-            
-            if model_id.startswith('gpt-5'):
-                if 'reasoning' in model_id:
-                    quality = "Best"
-                    speed = "Slow"
-                    cost_estimate = "$5-40 per 1k pairs"
-                elif 'nano' in model_id:
-                    quality = "Basic"
-                    speed = "Fastest"
-                    cost_estimate = "$0.05-0.40 per 1k pairs"
-                elif 'mini' in model_id:
-                    quality = "Good"
-                    speed = "Fast"
-                    cost_estimate = "$0.25-3 per 1k pairs"
-                else:
-                    quality = "Excellent"
-                    speed = "Medium"
-                    cost_estimate = "$1.25-10 per 1k pairs"
-            
-            elif model_id.startswith(('o1-', 'o3-')):
-                if 'mini' in model_id:
-                    quality = "Excellent"
-                    speed = "Slow"
-                    cost_estimate = "$3-12 per 1k pairs"
-                else:
-                    quality = "Exceptional"
-                    speed = "Very Slow"
-                    cost_estimate = "$15-60 per 1k pairs"
-            
-            elif 'gpt-4o' in model_id:
-                if 'mini' in model_id:
-                    quality = "Good"
-                    speed = "Fast"
-                    cost_estimate = "$0.15-0.60 per 1k pairs"
-                else:
-                    quality = "Excellent"
-                    speed = "Fast"
-                    cost_estimate = "$1.50-10 per 1k pairs"
-            
-            elif model_id.startswith('gpt-4'):
-                quality = "Very Good"
-                speed = "Medium"
-                cost_estimate = "$5-30 per 1k pairs"
-            
-            elif model_id.startswith('gpt-3.5'):
-                quality = "Basic"
-                speed = "Very Fast"
-                cost_estimate = "$0.05-1.50 per 1k pairs"
-            
-            elif model_id.startswith('chatgpt'):
-                quality = "Good"
-                speed = "Fast"
-                cost_estimate = "$0.50-5 per 1k pairs"
-            
-            available_models[model_id] = {
-                "name": model_id,
-                "quality": quality,
-                "speed": speed,
-                "cost": cost_estimate,
-                "created": model.created
-            }
-        
-        if not available_models:
-            raise Exception("No chat models found in API response")
-        
-        return available_models
-        
-    except Exception as e:
-        # Fallback to hardcoded models if API call fails (e.g., Responses API doesn't support models.list())
-        import time
-        current_time = int(time.time())
-        # Return the models we actually use, sorted by preference
-        fallback_models = {
-            "gpt-5.1": {"name": "gpt-5.1", "quality": "Excellent", "speed": "Medium", "cost": "$1.25-10 per 1k pairs", "created": current_time - 100},
-            "gpt-5-mini": {"name": "gpt-5-mini", "quality": "Good", "speed": "Fast", "cost": "$0.25-3 per 1k pairs", "created": current_time - 200},
-            "gpt-5-nano": {"name": "gpt-5-nano", "quality": "Basic", "speed": "Fastest", "cost": "$0.05-0.40 per 1k pairs", "created": current_time - 300},
-            "gpt-4.1": {"name": "gpt-4.1", "quality": "Excellent", "speed": "Medium", "cost": "$1.25-10 per 1k pairs", "created": current_time - 400},
-            "gpt-4.1-mini": {"name": "gpt-4.1-mini", "quality": "Good", "speed": "Fast", "cost": "$0.25-3 per 1k pairs", "created": current_time - 500},
-            "gpt-4.1-nano": {"name": "gpt-4.1-nano", "quality": "Basic", "speed": "Fastest", "cost": "$0.05-0.40 per 1k pairs", "created": current_time - 600},
+def fetch_available_models(api_key=None):
+    """Static list of the selectable Claude models: model_id -> display info (api_key is unused)."""
+    return {
+        m: {
+            "name": m,
+            "quality": MODEL_CONFIGS[m]["quality"],
+            "speed": MODEL_CONFIGS[m]["speed"],
+            "cost": f"${API_PRICING[m]['prompt']:.2f} in / ${API_PRICING[m]['completion']:.2f} out per 1M tokens",
         }
-        # Only show error in debug mode, otherwise silently use fallback
-        if is_debug_mode():
-            st.warning(f"⚠️ Could not fetch models from API (using fallback): {e!s}")
-        return fallback_models
+        for m in CLAUDE_MODELS
+    }
 
-def estimate_api_cost(prompt_tokens: int, completion_tokens: int, model: str = "gpt-4o-mini") -> float:
-    """Estimate the cost of an API call based on token usage"""
+def estimate_api_cost(prompt_tokens: int, completion_tokens: int, model: str = DEFAULT_MODEL) -> float:
+    """Estimate the cost (USD) of an API call from token usage; unknown models price as the default."""
     if model not in API_PRICING:
-        model = "gpt-4o-mini"
+        model = DEFAULT_MODEL
     
     prompt_cost = (prompt_tokens / 1_000_000) * API_PRICING[model]["prompt"]
     completion_cost = (completion_tokens / 1_000_000) * API_PRICING[model]["completion"]
@@ -240,30 +137,6 @@ def estimate_input_tokens_stateless(num_mentors: int, num_mentees: int, base_pro
     mentee_tokens = num_mentees * 50
     return base_prompt_tokens + mentor_tokens + mentee_tokens
 
-def estimate_input_tokens_stateful_first(num_mentors: int, num_mentees: int, base_prompt_tokens: int = 3500) -> int:
-    """
-    Estimate input tokens for first batch in stateful mode (full context).
-    Same as stateless for the first batch.
-    """
-    return estimate_input_tokens_stateless(num_mentors, num_mentees, base_prompt_tokens)
-
-def estimate_input_tokens_stateful_subsequent(num_mentors: int, base_overhead: int = 2000) -> int:
-    """
-    Estimate input tokens for subsequent batches in stateful mode.
-    
-    Based on user observation: ~5k tokens for subsequent batches.
-    Only new mentors are sent, mentees are preserved in conversation context.
-    
-    Args:
-        num_mentors: Number of NEW mentors in this batch
-        base_overhead: Base overhead for API call structure
-    
-    Returns:
-        Estimated input tokens
-    """
-    # Much lower - only new mentors (~500 tokens per new mentor)
-    return base_overhead + (num_mentors * 500)
-
 def estimate_output_tokens(num_mentors: int, num_mentees: int) -> int:
     """
     Estimate output tokens for compatibility matrix.
@@ -289,9 +162,6 @@ MATRIX_OUTPUT_CAP = 100000
 def calculate_optimal_batch_size(
     total_mentors: int,
     num_mentees: int,
-    model: str = None,
-    use_stateful: bool = False,
-    safety_margin: float = 0.90
 ) -> int:
     """
     Largest mentor batch whose estimated OUTPUT tokens stay under MATRIX_OUTPUT_CAP.
@@ -303,7 +173,6 @@ def calculate_optimal_batch_size(
     Args:
         total_mentors: Total number of mentors to process
         num_mentees: Total number of mentees
-        model, use_stateful, safety_margin: accepted for backward-compatible call sites; ignored.
 
     Returns:
         Optimal batch size (number of mentors per batch)
@@ -322,9 +191,6 @@ def calculate_optimal_batch_size(
 def estimate_batch_tokens(
     num_mentors: int,
     num_mentees: int,
-    model: str,
-    use_stateful: bool = False,
-    is_first_batch: bool = True
 ) -> tuple[int, int]:
     """
     Estimate input and output tokens for a batch.
@@ -332,18 +198,11 @@ def estimate_batch_tokens(
     Args:
         num_mentors: Number of mentors in this batch
         num_mentees: Number of mentees
-        model: Model name
-        use_stateful: Whether stateful mode is enabled
-        is_first_batch: Whether this is the first batch (for stateful mode)
     
     Returns:
         Tuple of (input_tokens, output_tokens)
     """
-    if use_stateful and not is_first_batch:
-        input_tokens = estimate_input_tokens_stateful_subsequent(num_mentors)
-    else:
-        input_tokens = estimate_input_tokens_stateless(num_mentors, num_mentees)
-    
+    input_tokens = estimate_input_tokens_stateless(num_mentors, num_mentees)
     output_tokens = estimate_output_tokens(num_mentors, num_mentees)
     
     return input_tokens, output_tokens
@@ -410,7 +269,7 @@ def clean_dataframe(df):
 
 def get_model_config(model_name):
     """Get configuration for a specific model"""
-    return MODEL_CONFIGS.get(model_name, MODEL_CONFIGS['default'])
+    return MODEL_CONFIGS.get(model_name, MODEL_CONFIGS[DEFAULT_MODEL])
 
 def is_field_compatible(field1, field2):
     """

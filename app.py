@@ -4,7 +4,7 @@ import time
 import pandas as pd
 import streamlit as st
 
-from info import MENTEE_COLUMNS, MENTOR_COLUMNS
+from info import DEFAULT_MODEL, MENTEE_COLUMNS, MENTOR_COLUMNS
 from llm_client import ClaudeClient, LLMError, parse_json
 from matching import apply_country_restrictions, parse_matrix_response
 from prompts import create_default_prompt, get_prompt_for_api
@@ -130,14 +130,19 @@ def _render_parse_report(report, expected_mentors, expected_mentees):
     return report.df
 
 
-MATRIX_MODEL = "claude-opus-5-5"  # controller ruling: fixed model, not st.session_state.model_choice
-REASONING_MODEL = "claude-opus-5-5"
+MATRIX_MODEL = DEFAULT_MODEL  # defaults; the UI's st.session_state.model_choice overrides (see _model_choice)
+REASONING_MODEL = DEFAULT_MODEL
 REASONING_MAX_TOKENS = 8000
 MATRIX_MAX_OUTPUT_TOKENS = 120000  # headroom under Claude's 128K output cap
 
 
+def _model_choice(default: str) -> str:
+    """The user's selected Claude model (Configure tab), else the given default."""
+    return st.session_state.get("model_choice", default)
+
+
 def _anthropic_key() -> str:
-    """Anthropic API key from the environment, then Streamlit secrets (Task 5 wires the UI)."""
+    """Anthropic API key from the environment, then Streamlit secrets. The only place it is read."""
     key = os.environ.get("ANTHROPIC_API_KEY")
     if key:
         return key
@@ -162,18 +167,18 @@ def _score_mentor_batch(mentees_df, mentor_batch_df) -> str:
     )
     budget = int(estimate_output_tokens(len(mentor_batch_df), len(mentees_df)) * 1.5)
     budget = max(4096, min(budget, MATRIX_MAX_OUTPUT_TOKENS))
-    client = ClaudeClient(MATRIX_MODEL, _anthropic_key())
+    client = ClaudeClient(_model_choice(MATRIX_MODEL), _anthropic_key())
     return client.complete_json(system, user, max_tokens=budget, cache_system=True)
 
 
-def generate_matrix_in_batches(mentees_df, mentors_df, api_key=None, model=None, batch_size=None, use_stateful=False):
+def generate_matrix_in_batches(mentees_df, mentors_df, batch_size=None):
     """Generate the compatibility matrix one mentor batch at a time (Claude + prompt caching).
 
     Args:
         batch_size: Mentors per batch. If None, sized so each batch's estimated output stays
                     under the 128K output cap.
-        api_key, model, use_stateful: accepted for backward-compatible call sites; ignored.
-                    The model is fixed (MATRIX_MODEL) and the key comes from _anthropic_key().
+
+    The model is st.session_state.model_choice (default MATRIX_MODEL); the key comes from _anthropic_key().
 
     Returns:
         Complete matrix DataFrame, or None if no batch succeeded.
@@ -488,11 +493,10 @@ def generate_matrix_in_batches(mentees_df, mentors_df, api_key=None, model=None,
     return complete_matrix_df
 
 
-def get_reasoning_for_assignments(assignments, mentees_df, mentors_df, api_key=None, model=None):
+def get_reasoning_for_assignments(assignments, mentees_df, mentors_df):
     """Get a short reasoning per assignment from Claude; {} on any failure (non-critical).
 
-    api_key/model are ignored (kept for caller compatibility): the model is REASONING_MODEL and
-    the key comes from _anthropic_key().
+    The model is st.session_state.model_choice (default REASONING_MODEL); the key comes from _anthropic_key().
     """
     try:
         
@@ -579,7 +583,7 @@ def get_reasoning_for_assignments(assignments, mentees_df, mentors_df, api_key=N
 - Mentor experience: {ad['mentor_experience']} years
 """
 
-        text = ClaudeClient(REASONING_MODEL, _anthropic_key()).complete_json(
+        text = ClaudeClient(_model_choice(REASONING_MODEL), _anthropic_key()).complete_json(
             system, user, max_tokens=REASONING_MAX_TOKENS
         )
         data = parse_json(text)
@@ -697,7 +701,7 @@ def main():
     if 'mentee_search' not in st.session_state:
         st.session_state.mentee_search = ""
     if 'model_choice' not in st.session_state:
-        st.session_state.model_choice = "gpt-5.1"  # Default to latest model
+        st.session_state.model_choice = DEFAULT_MODEL
     if 'reset_counter' not in st.session_state:
         st.session_state.reset_counter = 0
     
@@ -713,11 +717,8 @@ def main():
             # Default: ON if env var not present or invalid
             st.session_state.debug_mode = True
     
-    import os
-    
-    # Try to get from session state or environment
     if 'api_key' not in st.session_state:
-        st.session_state.api_key = os.getenv('OPENAI_API_KEY', '')
+        st.session_state.api_key = _anthropic_key()
     
     tab_names = [
         "1️⃣ Configure Settings",
