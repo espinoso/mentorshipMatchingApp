@@ -1,59 +1,28 @@
-import streamlit as st
-import pandas as pd
 import json
-from openai import OpenAI
 import time
 
-from info import (
-    MENTEE_COLUMNS, MENTOR_COLUMNS, MODEL_TOKEN_LIMITS
-)
+import pandas as pd
+import streamlit as st
+from openai import OpenAI
 
-from ui import (
-    CSS_STYLES
-)
-
+from info import MENTEE_COLUMNS, MENTOR_COLUMNS, MODEL_TOKEN_LIMITS
+from matching import apply_country_restrictions, parse_matrix_response
+from prompts import create_default_prompt, get_prompt_for_api
+from ui import CSS_STYLES
+from ui_config import render_config_tab
+from ui_matches import render_matches_tab
+from ui_overview import render_overview_tab
+from ui_processing import render_processing_tab
+from ui_prompt import render_prompt_tab
+from ui_upload import render_upload_tab
 from utils import (
-    estimate_tokens, estimate_api_cost, show_debug_info,
-    get_model_config, extract_openai_answer, is_debug_mode,
-    format_time, calculate_eta
+    estimate_api_cost,
+    extract_openai_answer,
+    get_model_config,
+    is_debug_mode,
+    show_debug_info,
 )
-
-from prompts import (
-    get_prompt_for_api, create_default_prompt
-)
-
-from matching import (
-    parse_matrix_response, apply_country_restrictions
-)
-
-from validation import (
-    prepare_data_for_assistant
-)
-
-from ui_config import (
-    render_config_tab
-)
-
-
-from ui_upload import (
-    render_upload_tab
-)
-
-from ui_prompt import (
-    render_prompt_tab
-)
-
-from ui_overview import (
-    render_overview_tab
-)
-
-from ui_matches import (
-    render_matches_tab
-)
-
-from ui_processing import (
-    render_processing_tab
-)
+from validation import prepare_data_for_assistant
 
 st.set_page_config(
     page_title="Mentorship Matching System",
@@ -63,6 +32,104 @@ st.set_page_config(
 )
 
 st.markdown(CSS_STYLES, unsafe_allow_html=True)
+
+
+def _render_parse_report(report, expected_mentors, expected_mentees):
+    """Render a MatrixParseReport with the same st.* messages the old parser emitted.
+
+    Returns the parsed DataFrame, or None when the batch is unusable, so callers keep the
+    old `parse_matrix_response` contract (df-or-None). Debug gating matches the original.
+    """
+    # Fatal errors the old parser returned on immediately, before any validation output.
+    if report.df is None and report.error and report.error != "No valid mentor data after filtering":
+        if report.error == "Received a configuration object instead of JSON content":
+            st.error("❌ **Invalid response: Received configuration object instead of JSON content**")
+            st.warning("""
+            This happens when using reasoning models (gpt-5-mini, gpt-5-nano) that cannot produce structured JSON.
+
+            **Solution:** Please use a compatible model:
+            - ✅ **gpt-4.1-mini** (recommended)
+            - ✅ **gpt-4.1-nano** (fastest)
+            - ✅ **gpt-5.1** or **gpt-4.1** (highest quality)
+            """)
+        elif report.error == "Could not find JSON object boundaries in response":
+            st.error("❌ Could not find JSON object boundaries in response")
+            with st.expander("View raw response"):
+                st.text(report.raw_excerpt)
+        else:
+            st.error(f"❌ {report.error}")
+            show_debug_info()
+            with st.expander("View raw response"):
+                st.text(report.raw_excerpt)
+        return None
+
+    # Non-fatal: the model wrapped the JSON in extra prose.
+    if report.notes:
+        st.warning("⚠️ AI included explanatory text instead of pure JSON. Attempting to extract JSON...")
+        for note in report.notes:
+            with st.expander("📝 Text around JSON (should be empty)"):
+                st.text(note)
+
+    # Wrong IDs the AI returned (one warning per mentor, then the summaries).
+    for mentor_id in report.wrong_mentors:
+        st.warning(f"⚠️ AI returned WRONG mentor ID: '{mentor_id}' (not in requested batch)")
+    if report.wrong_mentors:
+        st.error(f"🚨 WRONG MENTOR IDs: AI returned {len(report.wrong_mentors)} mentor(s) NOT in requested batch!")
+        with st.expander(f"❌ Wrong mentor IDs ({len(report.wrong_mentors)})"):
+            for m in sorted(report.wrong_mentors):
+                st.write(f"- {m} (REJECTED - not in batch request)")
+
+    if report.wrong_mentees:
+        st.error(f"🚨 WRONG MENTEE IDs: AI returned {len(report.wrong_mentees)} invalid mentee(s)!")
+        with st.expander(f"❌ Wrong mentee IDs ({len(report.wrong_mentees)})"):
+            for m in sorted(report.wrong_mentees)[:10]:
+                st.write(f"- {m}")
+
+    mentors_received = len(expected_mentors) - len(report.missing_mentors)
+    mentees_received = len(expected_mentees) - len(report.missing_mentees_filled)
+    if is_debug_mode():
+        st.caption(
+            f"📊 Valid data: {mentors_received}/{len(expected_mentors)} mentors, "
+            f"{mentees_received}/{len(expected_mentees)} mentees"
+        )
+
+    expected_total = len(expected_mentors) * len(expected_mentees)
+    actual_total = round(report.completion_rate / 100 * expected_total)
+    if report.completion_rate < 100:
+        st.error(
+            f"🚨 INCOMPLETE RESPONSE: Expected {expected_total} scores, got {actual_total} "
+            f"({report.completion_rate:.1f}% complete)"
+        )
+        st.error(f"   Missing {expected_total - actual_total} combinations!")
+        st.error("   ⚠️ The AI is still omitting combinations despite instructions.")
+    elif is_debug_mode():
+        st.caption(f"✅ COMPLETE: All {expected_total} scores received")
+
+    if report.missing_mentors:
+        st.warning(f"⚠️ Missing {len(report.missing_mentors)} requested mentor(s)")
+        with st.expander(f"📋 Missing mentors ({len(report.missing_mentors)})"):
+            for m in sorted(report.missing_mentors):
+                st.write(f"- {m}")
+
+    if report.missing_mentees_filled:
+        st.warning(f"⚠️ Missing {len(report.missing_mentees_filled)} mentee(s) in responses")
+        with st.expander(f"📋 Missing mentees ({len(report.missing_mentees_filled)})"):
+            for m in sorted(report.missing_mentees_filled):
+                st.write(f"- {m}")
+
+    if report.df is None:
+        st.error("❌ No valid mentor data after filtering!")
+        return None
+
+    if report.missing_mentees_filled:
+        st.warning(
+            f"⚠️ {len(report.missing_mentees_filled)} mentee column(s) missing from matrix. "
+            "Filling with 30% (assumed poor match)."
+        )
+        st.caption("The AI omitted these combinations despite instructions. This indicates likely poor matches.")
+        show_debug_info()
+
+    return report.df
 
 
 def call_openai_api_with_chat_completions(prompt, mentees_df, mentors_df, api_key, model="gpt-4o-mini", mentor_subset=None, use_stateful=False, previous_response_id=None, is_first_batch=True):
@@ -107,7 +174,7 @@ def call_openai_api_with_chat_completions(prompt, mentees_df, mentors_df, api_ke
             # Stateful mode, subsequent batch: Only send new mentor data (context preserved)
             if is_debug_mode():
                 st.info("🔗 Stateful mode: Sending only new mentor batch (context preserved from previous call)")
-            combined_data = prepare_data_for_assistant(None, mentors_to_use, [])
+            combined_data = prepare_data_for_assistant(None, mentors_to_use)
             full_message = f"Evaluate these additional mentors against the same mentees from the previous context:\n\n{combined_data}"
         else:
             # Stateless mode OR first batch: Send complete context
@@ -326,7 +393,7 @@ def call_openai_api_with_chat_completions(prompt, mentees_df, mentors_df, api_ke
                             st.info(f"⏳ Rate limit reached. Waiting {total_wait}s...")
                     
                     if is_debug_mode():
-                        st.caption(f"💡 This is normal with rate-limited APIs. The system will automatically retry after waiting.")
+                        st.caption("💡 This is normal with rate-limited APIs. The system will automatically retry after waiting.")
                     time.sleep(total_wait)
                     continue
                 else:
@@ -362,9 +429,9 @@ def call_openai_api_with_chat_completions(prompt, mentees_df, mentors_df, api_ke
                     st.info("📋 Using Chat Completions output format")
             else:
                 # Could not extract from Responses API
-                st.error(f"❌ Could not extract response content")
+                st.error("❌ Could not extract response content")
                 if is_debug_mode():
-                    st.error(f"❌ Could not extract response content: {str(e)}")
+                    st.error(f"❌ Could not extract response content: {e!s}")
                     st.write("Debug - Response structure:", {
                         "has_output": hasattr(response, 'output'),
                         "output_type": type(getattr(response, 'output', None)),
@@ -380,9 +447,9 @@ def call_openai_api_with_chat_completions(prompt, mentees_df, mentors_df, api_ke
                             item_type = getattr(item, 'type', 'unknown')
                             st.write(f"  [{idx}] type={item_type}")
                             if item_type == 'reasoning':
-                                st.write(f"      (reasoning object - metadata, not the answer)")
+                                st.write("      (reasoning object - metadata, not the answer)")
                             elif item_type == 'message':
-                                st.write(f"      (message object - this should contain the answer)")
+                                st.write("      (message object - this should contain the answer)")
                     
                     st.warning("""
                     **What to check:**
@@ -398,9 +465,9 @@ def call_openai_api_with_chat_completions(prompt, mentees_df, mentors_df, api_ke
                     """)
                 return None
         except Exception as e:
-            st.error(f"❌ Error extracting response")
+            st.error("❌ Error extracting response")
             if is_debug_mode():
-                st.error(f"❌ Unexpected error extracting response: {str(e)}")
+                st.error(f"❌ Unexpected error extracting response: {e!s}")
                 st.write("Debug - Full response:", response)
             return None
         
@@ -460,7 +527,7 @@ def call_openai_api_with_chat_completions(prompt, mentees_df, mentors_df, api_ke
             return response_content
         
     except Exception as e:
-        st.error(f"❌ Error: {str(e)}")
+        st.error(f"❌ Error: {e!s}")
         show_debug_info()
         return None
 def call_openai_api_chat_completions_legacy(prompt, mentees_df, mentors_df, api_key, model="gpt-4o-mini", mentor_subset=None):
@@ -527,7 +594,7 @@ def call_openai_api_chat_completions_legacy(prompt, mentees_df, mentors_df, api_
     except Exception as e:
         st.error("❌ API Error")
         if is_debug_mode():
-            st.error(f"❌ Legacy API Error: {str(e)}")
+            st.error(f"❌ Legacy API Error: {e!s}")
         return None
 
 
@@ -553,8 +620,13 @@ def generate_matrix_in_batches(mentees_df, mentors_df, api_key, model, batch_siz
     Returns:
         Complete matrix DataFrame
     """
+    from progress_ui import (
+        initialize_progress_tracking,
+        render_batch_card,
+        render_progress_overview,
+        update_batch_progress,
+    )
     from utils import calculate_optimal_batch_size, estimate_batch_tokens, get_model_config
-    from progress_ui import initialize_progress_tracking, render_progress_overview, update_batch_progress, render_batch_card
     
     all_mentor_ids = mentors_df[MENTOR_COLUMNS['id']].tolist()
     all_mentee_ids = mentees_df[MENTEE_COLUMNS['id']].tolist()
@@ -683,15 +755,16 @@ def generate_matrix_in_batches(mentees_df, mentors_df, api_key, model, batch_siz
                 show_debug_info()
             continue
         
-        batch_matrix_df = parse_matrix_response(response, mentor_batch, all_mentee_ids)
-        
+        batch_report = parse_matrix_response(response, mentor_batch, all_mentee_ids)
+        batch_matrix_df = _render_parse_report(batch_report, mentor_batch, all_mentee_ids)
+
         if batch_matrix_df is None:
             update_batch_progress(batch_num, 'error', {'error': 'Failed to parse response'})
             st.error(f"❌ Batch {batch_num} failed to parse")
             continue
         
         received_mentors = list(batch_matrix_df.index)
-        expected_mentors_set = set(str(m) for m in mentor_batch)
+        expected_mentors_set = {str(m) for m in mentor_batch}
         received_mentors_set = set(received_mentors)
         
         dict_size_before = len(combined_matrix_dict)
@@ -706,7 +779,7 @@ def generate_matrix_in_batches(mentees_df, mentors_df, api_key, model, batch_siz
             combined_matrix_dict[mentor_id] = batch_matrix_df.loc[mentor_id].to_dict()
         
         dict_size_after = len(combined_matrix_dict)
-        actual_new_entries = dict_size_after - dict_size_before
+        actual_new_entries = dict_size_after - dict_size_before  # noqa: F841 - flagged: computed but never read, maybe intended to be shown
         
         # Get token usage and cost if available (from last API response)
         tokens = None
@@ -777,10 +850,24 @@ def generate_matrix_in_batches(mentees_df, mentors_df, api_key, model, batch_siz
     st.divider()
     st.subheader("🌍 Applying Country Restrictions")
     st.info("🔍 Checking for country-based restrictions (Spain-Spain rule)...")
+    mentor_country_col = MENTOR_COLUMNS['country']
+    mentee_country_col = MENTEE_COLUMNS['country']
+    if mentor_country_col in mentors_df.columns and mentee_country_col in mentees_df.columns:
+        spain_mentors = (mentors_df[mentor_country_col].astype(str).str.strip().str.lower() == 'spain').sum()
+        spain_mentees = (mentees_df[mentee_country_col].astype(str).str.strip().str.lower() == 'spain').sum()
+        if spain_mentors and spain_mentees:
+            st.info(f"🇪🇸 Found {spain_mentors} Spanish mentor(s) and {spain_mentees} Spanish mentee(s)")
+
+    # countries=["spain"] preserves the legacy hardcoded Spain-Spain restriction (see Task 6).
     complete_matrix_df, filtered_matches = apply_country_restrictions(
-        complete_matrix_df, mentees_df, mentors_df
+        complete_matrix_df, mentees_df, mentors_df, countries=["spain"]
     )
-    
+
+    # A missing country column yields a skip-marker; render it like the old warning, no filtering.
+    if filtered_matches and "skipped" in filtered_matches[0]:
+        st.warning(f"⚠️ {filtered_matches[0]['skipped']}. Skipping country restrictions.")
+        filtered_matches = []
+
     # Display filtered matches information
     if filtered_matches:
         st.warning(f"🚫 **Country Restriction Applied**: {len(filtered_matches)} match(es) filtered")
@@ -816,7 +903,7 @@ def generate_matrix_in_batches(mentees_df, mentors_df, api_key, model, batch_siz
     mentors_received = len(complete_matrix_df)
     expected_count = len(all_mentor_ids)
     mentors_in_dict = set(complete_matrix_df.index)
-    mentors_requested = set(str(m) for m in all_mentor_ids)
+    mentors_requested = {str(m) for m in all_mentor_ids}
     
     missing_from_dict = mentors_requested - mentors_in_dict
     extra_in_dict = mentors_in_dict - mentors_requested
@@ -845,7 +932,7 @@ def generate_matrix_in_batches(mentees_df, mentors_df, api_key, model, batch_siz
         st.warning(f"⚠️ **DISCREPANCY**: Expected {expected_count} but only have {mentors_received} in final matrix")
     
     if mentors_received < expected_count:
-        missing = set(str(m) for m in all_mentor_ids) - set(complete_matrix_df.index)
+        missing = {str(m) for m in all_mentor_ids} - set(complete_matrix_df.index)
         st.warning(f"⚠️ Missing {len(missing)} mentors after initial batches")
         
         with st.expander(f"📋 Missing mentors ({len(missing)})"):
@@ -855,10 +942,10 @@ def generate_matrix_in_batches(mentees_df, mentors_df, api_key, model, batch_siz
         max_retries = 3
         for retry_num in range(1, max_retries + 1):
             # Recalculate what's still missing (convert to strings for comparison)
-            current_missing = set(str(m) for m in all_mentor_ids) - set(complete_matrix_df.index)
+            current_missing = {str(m) for m in all_mentor_ids} - set(complete_matrix_df.index)
             
             if not current_missing:
-                st.success(f"🎉 All mentors retrieved!")
+                st.success("🎉 All mentors retrieved!")
                 break
             
             st.info(f"🔄 Retry {retry_num}/{max_retries}: Attempting {len(current_missing)} missing mentors...")
@@ -893,8 +980,9 @@ def generate_matrix_in_batches(mentees_df, mentors_df, api_key, model, batch_siz
                         time.sleep(5)
                     continue
                 
-                retry_matrix_df = parse_matrix_response(retry_response, list(current_missing), all_mentee_ids)
-                
+                retry_report = parse_matrix_response(retry_response, list(current_missing), all_mentee_ids)
+                retry_matrix_df = _render_parse_report(retry_report, list(current_missing), all_mentee_ids)
+
                 if retry_matrix_df is not None and len(retry_matrix_df) > 0:
                     added_count = 0
                     for mentor_id in retry_matrix_df.index:
@@ -905,7 +993,7 @@ def generate_matrix_in_batches(mentees_df, mentors_df, api_key, model, batch_siz
                     
                     # Rebuild complete matrix from updated dictionary
                     complete_matrix_df = pd.DataFrame(combined_matrix_dict).T
-                    complete_matrix_df = complete_matrix_df[sorted(all_mentee_ids)]
+                    complete_matrix_df = complete_matrix_df[[str(m) for m in sorted(all_mentee_ids)]]
                     
                     mentors_received = len(complete_matrix_df)
                     st.info(f"📈 Matrix now has {mentors_received}/{expected_count} mentors")
@@ -920,12 +1008,12 @@ def generate_matrix_in_batches(mentees_df, mentors_df, api_key, model, batch_siz
                         time.sleep(5)
                         
             except Exception as e:
-                st.error(f"❌ Retry {retry_num} error: {str(e)}")
+                st.error(f"❌ Retry {retry_num} error: {e!s}")
                 if retry_num < max_retries:
                     st.info("⏳ Waiting 5 seconds before next retry...")
                     time.sleep(5)
         
-        final_missing = set(str(m) for m in all_mentor_ids) - set(complete_matrix_df.index)
+        final_missing = {str(m) for m in all_mentor_ids} - set(complete_matrix_df.index)
         if final_missing:
             st.warning(f"⚠️ After {max_retries} retries, still missing {len(final_missing)} mentors")
             with st.expander(f"📋 Permanently missing mentors ({len(final_missing)})"):
@@ -978,7 +1066,7 @@ def get_reasoning_for_assignments(assignments, mentees_df, mentors_df, api_key, 
                 })
             except Exception as e:
                 if is_debug_mode():
-                    st.warning(f"⚠️ Could not extract details for {mentee_id} → {mentor_id}: {str(e)}")
+                    st.warning(f"⚠️ Could not extract details for {mentee_id} → {mentor_id}: {e!s}")
                 assignment_details.append({
                     'mentee_id': str(mentee_id),
                     'mentor_id': str(mentor_id),
@@ -1064,7 +1152,7 @@ No markdown, no extra text, just the JSON object."""
         model_config = get_model_config(model)
         
         # Handle o1/o3/gpt-5-mini/gpt-5-nano models differently
-        is_reasoning_model = model_config.get('is_reasoning_model', False) or model.startswith("o1-") or model.startswith("o3-")
+        is_reasoning_model = model_config.get('is_reasoning_model', False) or model.startswith(("o1-", "o3-"))
         
         if responses_api:
             # Define schema for reasoning - must be object at root level
@@ -1176,7 +1264,7 @@ No markdown, no extra text, just the JSON object."""
                     else:
                         st.error("❌ Reasoning API call failed")
                         if is_debug_mode():
-                            st.error(f"❌ Reasoning API call failed: {str(e)}")
+                            st.error(f"❌ Reasoning API call failed: {e!s}")
                         return {}
             
             if response is None:
@@ -1219,12 +1307,12 @@ No markdown, no extra text, just the JSON object."""
             else:
                 st.error("❌ Could not extract reasoning response")
                 if is_debug_mode():
-                    st.error(f"❌ Could not extract reasoning response: {str(e)}")
+                    st.error(f"❌ Could not extract reasoning response: {e!s}")
                 return {}
         except Exception as e:
             st.error("❌ Error extracting reasoning response")
             if is_debug_mode():
-                st.error(f"❌ Unexpected error extracting reasoning response: {str(e)}")
+                st.error(f"❌ Unexpected error extracting reasoning response: {e!s}")
             return {}
         
         if is_debug_mode():
@@ -1233,12 +1321,9 @@ No markdown, no extra text, just the JSON object."""
                 st.text(response_text[:500])
         
         original_text = response_text
-        if response_text.startswith('```json'):
-            response_text = response_text[7:]
-        if response_text.startswith('```'):
-            response_text = response_text[3:]
-        if response_text.endswith('```'):
-            response_text = response_text[:-3]
+        response_text = response_text.removeprefix('```json')
+        response_text = response_text.removeprefix('```')
+        response_text = response_text.removesuffix('```')
         response_text = response_text.strip()
         
         try:
@@ -1292,7 +1377,7 @@ No markdown, no extra text, just the JSON object."""
     except json.JSONDecodeError as e:
         st.error("❌ JSON parsing error in reasoning")
         if is_debug_mode():
-            st.error(f"❌ JSON parsing error in reasoning: {str(e)}")
+            st.error(f"❌ JSON parsing error in reasoning: {e!s}")
             with st.expander("View raw reasoning response"):
                 try:
                     st.text(response_text[:2000])
@@ -1303,7 +1388,7 @@ No markdown, no extra text, just the JSON object."""
     except Exception as e:
         st.error("❌ Error getting reasoning")
         if is_debug_mode():
-            st.error(f"❌ Error getting reasoning: {str(e)}")
+            st.error(f"❌ Error getting reasoning: {e!s}")
             import traceback
             with st.expander("Error details"):
                 st.code(traceback.format_exc())

@@ -3,9 +3,11 @@ Progress UI Components for Tab 7 Processing
 Provides visual progress indicators, batch status cards, and time tracking
 """
 
-import streamlit as st
 import time
-from utils import format_time, calculate_eta, is_debug_mode
+
+import streamlit as st
+
+from utils import calculate_eta, format_time, is_debug_mode
 
 
 def initialize_progress_tracking(total_batches):

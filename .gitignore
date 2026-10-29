@@ -160,6 +160,10 @@ secrets.json
 # *.json
 files/
 
+# Local test data with real mentor/mentee info — never commit
+samples/
+supporting_docs/
+
 # Logs
 *.log
 logs/

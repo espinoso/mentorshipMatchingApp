@@ -5,7 +5,6 @@ Includes dictionaries and pattern matching for common transformations.
 
 import re
 import unicodedata
-from typing import Tuple, List, Optional
 
 # ============================================================================
 # PATTERN DICTIONARY - Common transformations
@@ -58,7 +57,6 @@ UNIVERSITY_NAME_MAPPING = {
     'universidad europea ': 'European University of Madrid',
     'european university of madrid (universidad europea de madrid)': 'European University of Madrid',
     'universidad europea de madrid ': 'European University of Madrid',
-    'universidad europea de madrid': 'European University of Madrid',
     
     # University of Seville
     'university of seville': 'University of Seville',
@@ -90,8 +88,6 @@ UNIVERSITY_NAME_MAPPING = {
     'fcup, porto, portugal': 'University of Porto',  # Faculty of Sciences, University of Porto
     
     # University of Valladolid (many variations)
-    'university of valladolid': 'University of Valladolid',
-    'universidad de valladolid': 'University of Valladolid',
     'universidad de valladolid - spain': 'University of Valladolid',
     'universidad de valladolid, spain': 'University of Valladolid',
     'universidad de valladolid - escuela tecnica superior de arquitectura': 'University of Valladolid',
@@ -113,8 +109,6 @@ UNIVERSITY_NAME_MAPPING = {
     'uam spain': 'Autonomous University of Madrid',
     
     # University of Seville
-    'university of seville': 'University of Seville',
-    'universidad de sevilla': 'University of Seville',
     'universidad de sevilla, spain': 'University of Seville',
     'university of sevilla': 'University of Seville',
     
@@ -137,8 +131,6 @@ UNIVERSITY_NAME_MAPPING = {
     'universidad de la laguna, spain': 'University of La Laguna',
     
     # University of Malaga
-    'universidad de malaga': 'University of Malaga',
-    'universidad de málaga': 'University of Malaga',
     'universidad de málaga (spain)': 'University of Malaga',
     
     # University of Navarra
@@ -154,7 +146,6 @@ UNIVERSITY_NAME_MAPPING = {
     'universidad de leon, spain': 'University of Leon',
     
     # University of Jaen
-    'university of jaén': 'University of Jaen',
     'university of jaen (spain)': 'University of Jaen',
     
     # University of Santiago de Compostela
@@ -215,7 +206,6 @@ UNIVERSITY_NAME_MAPPING = {
     'universitat de barcelona': 'University of Barcelona',
     'universit de barcelona': 'University of Barcelona',  # Missing 'at' - fix
     'universit of barcelona': 'University of Barcelona',  # After incorrect translation
-    'universitat de valencia': 'University of Valencia',
     'universit de valencia': 'University of Valencia',  # Missing 'at' - fix
     'universit of valencia': 'University of Valencia',  # After incorrect translation
     'universidad politecnica de madrid': 'Polytechnic University of Madrid',
@@ -437,7 +427,7 @@ def translate_spanish_to_english(text: str) -> str:
 # NORMALIZATION FUNCTIONS
 # ============================================================================
 
-def normalize_university_name(university: str, log_unmapped: List[str] = None) -> str:
+def normalize_university_name(university: str, log_unmapped: list[str] = None) -> str:
     """
     Normalize university name to standard English format.
     
@@ -509,7 +499,7 @@ def normalize_university_name(university: str, log_unmapped: List[str] = None) -
     return normalized.title()
 
 
-def normalize_country_name(country: str, log_unmapped: List[str] = None) -> str:
+def normalize_country_name(country: str, log_unmapped: list[str] = None) -> str:
     """
     Normalize country name - extract only country, remove cities.
     Only allows: Spain, Portugal, or N/A
@@ -567,7 +557,7 @@ def normalize_country_name(country: str, log_unmapped: List[str] = None) -> str:
     return "N/A"
 
 
-def normalize_education_level_with_patterns(level: str, log_unmapped: List[str] = None) -> str:
+def normalize_education_level_with_patterns(level: str, log_unmapped: list[str] = None) -> str:
     """
     Normalize education level using pattern matching.
     Only allows: Doctorate, PhD, Masters, Bachelors, High School, or N/A
@@ -734,7 +724,7 @@ def normalize_language_name(lang: str) -> str:
     return normalized.title().strip()
 
 
-def normalize_languages(languages: str, log_unmapped: List[str] = None) -> str:
+def normalize_languages(languages: str, log_unmapped: list[str] = None) -> str:
     """
     Normalize languages string to comma-separated list.
     Removes qualifiers, normalizes language names, handles different separators.
@@ -832,7 +822,7 @@ def normalize_languages(languages: str, log_unmapped: List[str] = None) -> str:
     return ", ".join(unique_languages)
 
 
-def normalize_mentor_country(country: str, log_unmapped: List[str] = None) -> str:
+def normalize_mentor_country(country: str, log_unmapped: list[str] = None) -> str:
     """
     Normalize mentor country name(s).
     Handles multiple countries, standardizes names, removes separators like "and" and "/".
@@ -925,7 +915,7 @@ def normalize_mentor_country(country: str, log_unmapped: List[str] = None) -> st
     return ", ".join(unique_countries)
 
 
-def normalize_mentor_country_of_origin(origin: str, log_unmapped: List[str] = None) -> str:
+def normalize_mentor_country_of_origin(origin: str, log_unmapped: list[str] = None) -> str:
     """
     Normalize mentor country of origin.
     Extracts country names from phrases like "Born in X", "Dual citizen of X and Y", etc.
@@ -1030,7 +1020,7 @@ def normalize_mentor_country_of_origin(origin: str, log_unmapped: List[str] = No
     return ", ".join(unique_countries)
 
 
-def normalize_mentor_alma_mater(alma_mater: str, log_unmapped: List[str] = None) -> str:
+def normalize_mentor_alma_mater(alma_mater: str, log_unmapped: list[str] = None) -> str:
     """
     Normalize mentor alma mater (institution where bachelor's degree was completed).
     - If only a country is listed, return N/A
@@ -1385,7 +1375,7 @@ FIELDS_TO_ADD_TO_GUIDE = [
 
 
 def normalize_mentor_field_of_expertise(field: str, client=None, cache=None, 
-                                       row_num: int=0, log_unmapped: List[str]=None) -> Tuple[str, List[str]]:
+                                       row_num: int=0, log_unmapped: list[str]=None) -> tuple[str, list[str]]:
     """
     Normalize mentor field of expertise to broad category.
     Maps specific fields to broad categories (for matching) and extracts specific terms.
@@ -1518,7 +1508,6 @@ Return only the broad field category:"""
             if cached_result is not None:
                 broad_category = cached_result
             else:
-                import openai
                 MAX_RETRIES = 3
                 RETRY_DELAY = 2
                 MODEL = "gpt-4o-mini"
@@ -1539,12 +1528,12 @@ Return only the broad field category:"""
                         broad_category = broad_category.strip('."\'')
                         cache.set(cache_key, broad_category)
                         break
-                    except Exception as e:
+                    except Exception:
                         if attempt < MAX_RETRIES - 1:
                             import time
                             time.sleep(RETRY_DELAY)
                         else:
-                            raise e
+                            raise
             
             # Extract specific terms (everything except the broad category)
             spec_terms = []
@@ -1578,7 +1567,7 @@ Return only the broad field category:"""
             return (broad_category, spec_terms)
         except Exception as e:
             if log_unmapped is not None:
-                log_unmapped.append(f"'{original}' → 'N/A' (AI classification failed: {str(e)})")
+                log_unmapped.append(f"'{original}' → 'N/A' (AI classification failed: {e!s})")
             return ("N/A", [])
     else:
         # No AI available - log and return original
@@ -1588,6 +1577,6 @@ Return only the broad field category:"""
 
 
 # Import pandas for pd.isna checks
+
 import pandas as pd
-from typing import Tuple, List
 

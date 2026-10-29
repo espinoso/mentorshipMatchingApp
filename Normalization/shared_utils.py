@@ -6,9 +6,9 @@ Includes caching, validation, reporting, and file I/O helpers.
 import hashlib
 import os
 from datetime import datetime
-from typing import Dict, Any, Optional, List, Tuple
-import pandas as pd
+from typing import Any
 
+import pandas as pd
 
 # ============================================================================
 # CACHING
@@ -18,7 +18,7 @@ class AICache:
     """In-memory cache for AI API results."""
     
     def __init__(self):
-        self.cache: Dict[str, Any] = {}
+        self.cache: dict[str, Any] = {}
         self.hits = 0
         self.misses = 0
     
@@ -27,7 +27,7 @@ class AICache:
         normalized = str(input_text).strip().lower()
         return hashlib.md5(normalized.encode()).hexdigest()
     
-    def get(self, cache_key: str) -> Optional[Any]:
+    def get(self, cache_key: str) -> Any | None:
         """Get cached result."""
         if cache_key in self.cache:
             self.hits += 1
@@ -39,7 +39,7 @@ class AICache:
         """Cache a result."""
         self.cache[cache_key] = result
     
-    def get_stats(self) -> Dict[str, int]:
+    def get_stats(self) -> dict[str, int]:
         """Get cache statistics."""
         total = self.hits + self.misses
         hit_rate = (self.hits / total * 100) if total > 0 else 0
@@ -56,7 +56,7 @@ class AICache:
 # FILE I/O
 # ============================================================================
 
-def find_column_flexible(df: pd.DataFrame, search_terms: List[str]) -> Optional[str]:
+def find_column_flexible(df: pd.DataFrame, search_terms: list[str]) -> str | None:
     """
     Find a column in dataframe using flexible matching.
     Case-insensitive, handles trailing spaces.
@@ -125,7 +125,7 @@ def clean_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     return df_clean
 
 
-def find_missing_data(df: pd.DataFrame, required_columns: Dict[str, str]) -> List[Tuple[int, str]]:
+def find_missing_data(df: pd.DataFrame, required_columns: dict[str, str]) -> list[tuple[int, str]]:
     """
     Find rows with missing data (N/A or empty) in required columns.
     
@@ -138,7 +138,7 @@ def find_missing_data(df: pd.DataFrame, required_columns: Dict[str, str]) -> Lis
     """
     missing = []
     for idx, row in df.iterrows():
-        for key, col_name in required_columns.items():
+        for col_name in required_columns.values():
             if col_name in df.columns:
                 value = row[col_name]
                 if pd.isna(value) or str(value).strip() == "" or str(value).strip() == "N/A":
@@ -150,7 +150,7 @@ def find_missing_data(df: pd.DataFrame, required_columns: Dict[str, str]) -> Lis
 # VALIDATION
 # ============================================================================
 
-def validate_required_columns(df: pd.DataFrame, required_columns: Dict[str, str]) -> Tuple[bool, List[str]]:
+def validate_required_columns(df: pd.DataFrame, required_columns: dict[str, str]) -> tuple[bool, list[str]]:
     """
     Validate that all required columns are present in dataframe.
     
@@ -162,7 +162,7 @@ def validate_required_columns(df: pd.DataFrame, required_columns: Dict[str, str]
         Tuple of (is_valid, missing_columns)
     """
     missing = []
-    for key, col_name in required_columns.items():
+    for col_name in required_columns.values():
         # Check exact match first
         if col_name not in df.columns:
             # Check flexible match (case-insensitive, trailing spaces)
@@ -213,11 +213,11 @@ class TransformationReport:
         if operation in self.stats:
             self.stats[operation] += count
     
-    def set_missing_data(self, missing: List[Tuple[int, str]]):
+    def set_missing_data(self, missing: list[tuple[int, str]]):
         """Set missing data locations."""
         self.stats['missing_data_locations'] = missing
     
-    def generate_summary(self, output_file: str, cache_stats: Optional[Dict] = None) -> str:
+    def generate_summary(self, output_file: str, cache_stats: dict | None = None) -> str:
         """Generate summary report text."""
         lines = []
         lines.append("=" * 80)
@@ -275,7 +275,7 @@ class TransformationReport:
         return "\n".join(lines)
 
 
-def write_error_log(errors: List[str], output_dir: str, script_name: str) -> str:
+def write_error_log(errors: list[str], output_dir: str, script_name: str) -> str:
     """
     Write error log to file.
     
@@ -298,8 +298,7 @@ def write_error_log(errors: List[str], output_dir: str, script_name: str) -> str
         f.write(f"Error Log - {script_name}\n")
         f.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
         f.write("=" * 80 + "\n\n")
-        for error in errors:
-            f.write(f"{error}\n")
+        f.writelines(f"{error}\n" for error in errors)
     
     return log_path
 

@@ -3,8 +3,8 @@ Institution type mapping dictionary for mentor processing.
 Maps various institution type values to standardized values.
 """
 
+
 import pandas as pd
-from typing import Tuple
 
 # Institution type mapping dictionary
 # Format: {original_value: (normalized_value, add_to_specialization)}
@@ -69,7 +69,7 @@ INSTITUTION_TYPE_MAPPING = {
 }
 
 
-def normalize_institution_type(original_value: str, log_transformations: list = None) -> Tuple[str, bool]:
+def normalize_institution_type(original_value: str, log_transformations: list = None) -> tuple[str, bool]:
     """
     Normalize institution type to one of: Industry, Academia, Industry & Academia.
     

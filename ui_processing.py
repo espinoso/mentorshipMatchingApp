@@ -3,19 +3,21 @@ UI Component for Tab 7: Processing & Results
 Handles the matching generation process, results display, and export functionality
 """
 
-import streamlit as st
-import pandas as pd
-import numpy as np
 import re
 import time
-from io import BytesIO
 from datetime import datetime
+from io import BytesIO
+
+import numpy as np
+import pandas as pd
+import streamlit as st
+
 from info import MENTEE_COLUMNS, MENTOR_COLUMNS
-from matching import hungarian_assignment, check_mentor_conflicts
-from validation import validate_and_flag_matches, analyze_score_distribution
-from visualization import create_heatmap
-from utils import is_debug_mode
+from matching import check_mentor_conflicts, hungarian_assignment
 from progress_ui import render_processing_summary
+from utils import is_debug_mode, show_debug_info
+from validation import analyze_score_distribution, validate_and_flag_matches
+from visualization import create_heatmap
 
 
 def get_country_flag(country_name):
@@ -204,7 +206,22 @@ def render_processing_tab():
                 
                 # Get max_mentees_per_mentor from session state (default to 2 for backward compatibility)
                 max_mentees_per_mentor = st.session_state.get('max_mentees_per_mentor', 2)
-                assignments = hungarian_assignment(matrix_df, max_mentees_per_mentor=max_mentees_per_mentor)
+                result = hungarian_assignment(matrix_df, max_mentees_per_mentor=max_mentees_per_mentor)
+
+                # Render the matrix-cleaning notes the old (st-coupled) solver used to emit.
+                cleaning = result.cleaning
+                if cleaning['nan_filled']:
+                    st.warning(f"⚠️ Found {cleaning['nan_filled']} NaN values in matrix. Replacing with 30% (poor match - AI omitted these)...")
+                    st.caption("NaN values indicate the AI skipped these combinations despite instructions. Treating as poor matches.")
+                    show_debug_info()
+                if cleaning['inf_replaced']:
+                    st.warning(f"⚠️ Found {cleaning['inf_replaced']} infinite values in matrix. Replacing with 50%...")
+                if cleaning['clipped']:
+                    st.warning(f"⚠️ Clipped {cleaning['clipped']} matrix value(s) outside the expected range [0, 100].")
+                if result.unmatched_mentees:
+                    st.warning(f"⚠️ {len(result.unmatched_mentees)} mentee(s) could not be matched (no mentor capacity left): {', '.join(map(str, result.unmatched_mentees))}")
+
+                assignments = result.assignments
                 st.session_state.assignments = assignments
                 
                 # Calculate statistics
@@ -252,7 +269,7 @@ def render_processing_tab():
                         st.write(f"Sample assignment key: {sample_key}")
                         st.write(f"Sample assignment types: ({type(sample_assignment[0]).__name__}, {type(sample_assignment[1]).__name__})")
                         if reasoning_dict:
-                            sample_reason_key = list(reasoning_dict.keys())[0]
+                            sample_reason_key = next(iter(reasoning_dict.keys()))
                             st.write(f"Sample reasoning key: {sample_reason_key}")
                             st.write(f"Sample reasoning types: ({type(sample_reason_key[0]).__name__}, {type(sample_reason_key[1]).__name__})")
                             st.write(f"Keys match? {sample_key in reasoning_dict}")
