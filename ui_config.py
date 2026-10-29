@@ -78,6 +78,12 @@ def render_config_tab():
     )
     
     st.session_state.max_mentees_per_mentor = max_mentees
+
+    restrict_spain = st.checkbox(
+        "Apply the Spain ↔ Spain mentoring restriction (Spanish mentors are not matched to Spanish mentees)",
+        value="spain" in st.session_state.get("country_restrictions", ["spain"]),
+    )
+    st.session_state.country_restrictions = ["spain"] if restrict_spain else []
     
     if is_debug_mode():
         st.info(f"ℹ️ Each mentor can be assigned to a maximum of {max_mentees} mentee(s). This constraint is enforced by the Hungarian algorithm during optimal assignment.")

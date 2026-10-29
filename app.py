@@ -345,9 +345,10 @@ def generate_matrix_in_batches(mentees_df, mentors_df, batch_size=None):
         if spain_mentors and spain_mentees:
             st.info(f"🇪🇸 Found {spain_mentors} Spanish mentor(s) and {spain_mentees} Spanish mentee(s)")
 
-    # countries=["spain"] preserves the legacy hardcoded Spain-Spain restriction (see Task 6).
+    # Organizer toggle (Configure step); default ["spain"] preserves the legacy Spain-Spain rule.
     complete_matrix_df, filtered_matches = apply_country_restrictions(
-        complete_matrix_df, mentees_df, mentors_df, countries=["spain"]
+        complete_matrix_df, mentees_df, mentors_df,
+        countries=st.session_state.get("country_restrictions", ["spain"]),
     )
 
     # A missing country column yields a skip-marker; render it like the old warning, no filtering.
@@ -747,6 +748,8 @@ def main():
         st.session_state.batch_size = 15
     if 'max_mentees_per_mentor' not in st.session_state:
         st.session_state.max_mentees_per_mentor = 2
+    if 'country_restrictions' not in st.session_state:
+        st.session_state.country_restrictions = ["spain"]
     if 'mentee_search' not in st.session_state:
         st.session_state.mentee_search = ""
     if 'model_choice' not in st.session_state:
