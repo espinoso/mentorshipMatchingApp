@@ -18,6 +18,7 @@ from shared_utils import (
     find_column_flexible,
     find_missing_data,
     generate_output_filename,
+    read_input_sheet,
     setup_claude,
     validate_required_columns,
     write_error_log,
@@ -392,9 +393,9 @@ def process_mentee_file(input_file: str, output_file: str = None, dry_run: bool 
     unmapped_program_levels = []
     unmapped_languages = []
     
-    # Read the Excel file (handle header row)
+    # Read the Excel file (sniff the header row — files may have blank leading rows)
     print("\n1. Reading input file...")
-    df = pd.read_excel(input_file, header=1)  # Skip first row (usually metadata)
+    df = read_input_sheet(input_file)
     print(f"   ✓ Loaded {len(df)} rows")
     print(f"   ✓ Columns found: {len(df.columns)}")
     

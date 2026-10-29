@@ -91,10 +91,13 @@ def test_budget_and_cache_and_invariant_system(monkeypatch):
     assert first["system"] == second["system"]
     # ...and the mentor batch (user) must differ.
     assert first["user"] != second["user"]
-    # Budget = estimate_output_tokens * 1.5, capped under the 128K output cap.
-    expected = int(estimate_output_tokens(2, 3) * 1.5)
-    assert first["max_tokens"] == max(4096, min(expected, app.MATRIX_MAX_OUTPUT_TOKENS))
+    # Budget = estimate_output_tokens * 1.5 PLUS a thinking allowance (Opus spends thinking
+    # tokens before the JSON), floored at that allowance and capped under the 128K output cap.
+    expected = int(estimate_output_tokens(2, 3) * 1.5) + app.THINKING_HEADROOM
+    assert first["max_tokens"] == max(app.THINKING_HEADROOM, min(expected, app.MATRIX_MAX_OUTPUT_TOKENS))
     assert first["max_tokens"] <= app.MATRIX_MAX_OUTPUT_TOKENS
+    # Regression guard: a small matrix must still leave room for thinking (the bug: budget was 4096).
+    assert first["max_tokens"] >= app.THINKING_HEADROOM
 
 
 def test_cutoff_raises_not_filled(monkeypatch):
