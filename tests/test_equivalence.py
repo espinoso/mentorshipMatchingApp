@@ -1,6 +1,6 @@
 """Golden equivalence test for the headless Hungarian assignment.
 
-There is no OpenAI key in CI, so we cannot run a live before/after match. Instead we pin a
+There is no API key in CI, so we cannot run a live before/after match. Instead we pin a
 FIXED synthetic score matrix and assert that `matching_core.hungarian_assignment` produces
 exactly the assignment the pre-refactor solver produced for it. Both implementations use the
 same slot-expansion + `scipy.linear_sum_assignment` + numeric mentee sort, so a fixed matrix

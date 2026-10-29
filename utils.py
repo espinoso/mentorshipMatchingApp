@@ -1,7 +1,6 @@
 import numpy as np
 import pandas as pd
 import streamlit as st
-import tiktoken
 
 from info import (
     API_PRICING,
@@ -84,14 +83,9 @@ def validate_uploaded_file(df, file_type):
     
     return errors, warnings, completeness
 
-def estimate_tokens(text: str, model: str = "gpt-4") -> int:
-    """Estimate the number of tokens in a text string"""
-    try:
-        encoding = tiktoken.encoding_for_model(model)
-    except:
-        encoding = tiktoken.get_encoding("cl100k_base")
-    
-    return len(encoding.encode(text))    
+def estimate_tokens(text: str) -> int:
+    """Rough token estimate (~4 chars/token); display-only, Claude has no offline tokenizer."""
+    return -(-len(text) // 4)
 
 def fetch_available_models(api_key=None):
     """Static list of the selectable Claude models: model_id -> display info (api_key is unused)."""
@@ -317,86 +311,6 @@ def is_debug_mode():
     else:
         # Default: ON if env var not present or invalid
         return True
-
-
-def extract_openai_answer(response):
-    """
-    Universal extractor for OpenAI Responses API.
-    
-    Handles reasoning models (o1, o3, gpt-5-mini, gpt-5-nano)
-    and standard models (gpt-5.1, gpt-4.1, etc.).
-    
-    For reasoning models: Looks for type == "message" items (ignores type == "reasoning")
-    For non-reasoning models: Uses response.output_text directly
-    
-    Args:
-        response: OpenAI Responses API response object
-        
-    Returns:
-        answer_text (str): The extracted text content
-        
-    Raises:
-        ValueError: If no valid answer text is found
-    """
-    
-    # 1. Fast path for non-reasoning models (gpt-4.1, gpt-5.1)
-    # These responses always contain .output_text
-    if hasattr(response, "output_text") and response.output_text:
-        return str(response.output_text)
-    
-    # 2. Fallback to scanning output items for assistant messages
-    if hasattr(response, "output"):
-        for item in response.output:
-            # Skip reasoning objects - they're metadata, not the answer
-            if getattr(item, "type", None) == "reasoning":
-                continue
-            
-            # Look for message items (this is where the actual answer is for reasoning models)
-            if getattr(item, "type", None) == "message":
-                # message.content is a list of content parts (text, images, etc.)
-                if hasattr(item, "content") and isinstance(item.content, list):
-                    for part in item.content:
-                        # Look for output_text parts
-                        if hasattr(part, "type") and getattr(part, "type", None) == "output_text":
-                            if hasattr(part, "text"):
-                                return str(part.text)
-                        # Fallback: if part has text attribute directly
-                        elif hasattr(part, "text"):
-                            text_value = part.text
-                            if isinstance(text_value, str):
-                                return text_value
-                            elif hasattr(text_value, "text"):
-                                return str(text_value.text)
-    
-    # 3. Fallback for future formats: raw JSON dictionaries
-    if isinstance(response, dict):
-        # Reasoning or non-reasoning, same approach
-        output = response.get("output") or []
-        for item in output:
-            # Skip reasoning objects
-            if item.get("type") == "reasoning":
-                continue
-            
-            if item.get("type") == "message":
-                parts = item.get("content", [])
-                for p in parts:
-                    if p.get("type") == "output_text":
-                        text = p.get("text")
-                        if text:
-                            return str(text)
-        
-        # Standard model shortcut
-        if "output_text" in response:
-            text = response["output_text"]
-            if text:
-                return str(text)
-    
-    # 4. If we got here, nothing was extracted
-    raise ValueError(
-        "Could not extract assistant response text. "
-        "Response format may be unsupported or empty. "
-        "For reasoning models, ensure there's a message item (not just reasoning objects)."
-    )
 
 
 def format_time(seconds):

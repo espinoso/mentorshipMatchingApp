@@ -275,7 +275,7 @@ def process_file_with_progress(
     Args:
         uploaded_file: Streamlit UploadedFile object
         file_type: 'mentee' or 'mentor'
-        api_key: OpenAI API key
+        api_key: Anthropic API key
         progress_container: Streamlit container for progress messages
         status_container: Streamlit container for current status
         cancel_flag: Dictionary with 'cancelled' key to check for cancellation
@@ -295,9 +295,8 @@ def process_file_with_progress(
         temp_input_path = save_uploaded_file_to_temp(uploaded_file)
         
         try:
-            # Setup OpenAI client (using the old API style for compatibility)
-            import openai
-            openai.api_key = api_key
+            from llm_client import ClaudeClient
+            client = ClaudeClient(shared_utils.NORMALIZATION_MODEL, api_key)
             
             # Initialize cache and report
             cache = shared_utils.AICache()
@@ -358,7 +357,7 @@ def process_file_with_progress(
                         output_file=temp_output_path,
                         dry_run=False,
                         test_rows=None,
-                        client=openai,
+                        client=client,
                         cache=cache,
                         report=report
                     )
@@ -375,7 +374,7 @@ def process_file_with_progress(
                         output_file=temp_output_path,
                         dry_run=False,
                         test_rows=None,
-                        client=openai,
+                        client=client,
                         cache=cache,
                         report=report
                     )

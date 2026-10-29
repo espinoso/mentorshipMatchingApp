@@ -43,12 +43,9 @@ def _render_parse_report(report, expected_mentors, expected_mentees):
         if report.error == "Received a configuration object instead of JSON content":
             st.error("❌ **Invalid response: Received configuration object instead of JSON content**")
             st.warning("""
-            This happens when using reasoning models (gpt-5-mini, gpt-5-nano) that cannot produce structured JSON.
+            The model returned a configuration object instead of the match scores.
 
-            **Solution:** Please use a compatible model:
-            - ✅ **gpt-4.1-mini** (recommended)
-            - ✅ **gpt-4.1-nano** (fastest)
-            - ✅ **gpt-5.1** or **gpt-4.1** (highest quality)
+            **Solution:** Re-run the match, or pick a different Claude model in the sidebar.
             """)
         elif report.error == "Could not find JSON object boundaries in response":
             st.error("❌ Could not find JSON object boundaries in response")
@@ -288,7 +285,7 @@ def generate_matrix_in_batches(mentees_df, mentors_df, batch_size=None):
 
             combined_matrix_dict[mentor_id] = batch_matrix_df.loc[mentor_id].to_dict()
 
-        # Prepare batch details (token/cost telemetry dropped with the OpenAI usage payload)
+        # Prepare batch details (token/cost telemetry dropped)
         batch_details = {
             'mentors': len(batch_matrix_df),
             'mentees': len(all_mentee_ids),

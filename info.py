@@ -63,18 +63,6 @@ MODEL_CONFIGS = {
 }
 
 # =====================================================================
-# MODEL TOKEN LIMITS
-# Context window per model. Output is capped separately at 128K tokens
-# (see MODEL_CONFIGS[...]['max_output_tokens']).
-# =====================================================================
-
-MODEL_TOKEN_LIMITS = {
-    "claude-opus-5-5": 1_000_000,
-    "claude-sonnet-5-5": 1_000_000,
-    "claude-haiku-5-5": 1_000_000,
-}
-
-# =====================================================================
 # API PRICING
 # USD per 1M tokens (Claude)
 # =====================================================================

@@ -19,7 +19,7 @@ def test_get_model_config_opus():
 
 
 def test_get_model_config_unknown_falls_back_to_default():
-    assert get_model_config("gpt-5.1") == MODEL_CONFIGS[DEFAULT_MODEL]
+    assert get_model_config("not-a-model") == MODEL_CONFIGS[DEFAULT_MODEL]
 
 
 def test_available_models_are_static_claude_list():
@@ -37,7 +37,7 @@ def test_cost_uses_claude_pricing(model):
 def test_opus_pricing_values_and_unknown_model_prices_as_default():
     assert estimate_api_cost(1_000_000, 1_000_000, "claude-opus-5-5") == pytest.approx(24.0)
     assert estimate_api_cost(1_000_000, 0, "claude-sonnet-5-5") == pytest.approx(2.0)
-    assert estimate_api_cost(1_000_000, 0, "gpt-5.1") == pytest.approx(4.0)
+    assert estimate_api_cost(1_000_000, 0, "not-a-model") == pytest.approx(4.0)
 
 
 def test_model_choice_drives_matrix_and_reasoning_model(monkeypatch):
