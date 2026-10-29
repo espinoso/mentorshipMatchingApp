@@ -72,6 +72,14 @@ def get_country_flag(country_name):
 # TODO: Move to api_client.py and update import
 
 
+def _back_to_generate():
+    """Enabled escape hatch shown on any dead-end run, so the locked rail can't trap the user."""
+    if st.button("← Back to Generate", key="back_to_generate"):
+        st.session_state["start_processing"] = False
+        st.session_state["step"] = 4
+        st.rerun()
+
+
 def render_processing_tab():
     """Render Tab 7: Processing & Results"""
     
@@ -87,6 +95,7 @@ def render_processing_tab():
     if not ready:
         st.session_state.start_processing = False  # don't leave the rail locked
         st.error("❌ Prerequisites not met. Please go back to the earlier steps to configure settings and upload data.")
+        _back_to_generate()
         st.stop()
     
     # Check if we should start processing (triggered from the Generate step)
@@ -144,6 +153,7 @@ def render_processing_tab():
                 """, unsafe_allow_html=True)
             else:
                 st.error("🛑 Cannot proceed: Duplicate IDs found. Please fix your data and reload.")
+            _back_to_generate()
             st.stop()
         
         # Only show validation success in debug mode
@@ -544,4 +554,5 @@ def render_processing_tab():
     else:
         # Show waiting message if no matches yet
         st.info("👆 Click 'Generate Matches' in the Generate step to start the matching process.")
+        _back_to_generate()
 
