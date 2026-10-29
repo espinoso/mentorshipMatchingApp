@@ -774,6 +774,10 @@ def main():
         and st.session_state.get("mentors_df") is not None
     )
     has_results = st.session_state.get("matches") is not None
+    if st.session_state.get("start_processing"):
+        render_rail(5, has_data, has_results, clickable=False)  # locked: a stray click can't derail the run
+        render_processing_tab()  # runs the pipeline this rerun, then clears start_processing
+        return
     step = _resolve_step(has_data, has_results)
     render_rail(step, has_data, has_results)
 

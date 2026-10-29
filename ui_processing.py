@@ -85,10 +85,11 @@ def render_processing_tab():
     )
     
     if not ready:
-        st.error("❌ Prerequisites not met. Please go back to Tab 6 to configure settings and upload data.")
+        st.session_state.start_processing = False  # don't leave the rail locked
+        st.error("❌ Prerequisites not met. Please go back to the earlier steps to configure settings and upload data.")
         st.stop()
     
-    # Check if we should start processing (triggered from Tab 6)
+    # Check if we should start processing (triggered from the Generate step)
     if st.session_state.get('start_processing', False):
         st.session_state.start_processing = False
         st.session_state.last_match_time = datetime.now()
@@ -542,5 +543,5 @@ def render_processing_tab():
                     """, unsafe_allow_html=True)
     else:
         # Show waiting message if no matches yet
-        st.info("👆 Click 'Generate Matches' in Tab 6 to start the matching process.")
+        st.info("👆 Click 'Generate Matches' in the Generate step to start the matching process.")
 
