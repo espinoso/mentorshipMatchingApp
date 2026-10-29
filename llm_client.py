@@ -34,17 +34,24 @@ class ClaudeClient:
         doesn't hit the HTTP timeout. No temperature/top_p: current Claude models reject them.
         cache_system marks the system prompt as an ephemeral prompt-cache prefix.
         """
-        try:
-            import anthropic
-        except ImportError as e:  # pragma: no cover
-            raise LLMError("The 'anthropic' package is not installed.") from e
-
         text = f"{system}\n\n{_JSON_INSTRUCTION}"
         system_param = (
             [{"type": "text", "text": text, "cache_control": {"type": "ephemeral"}}]
             if cache_system
             else text
         )
+        return self._stream(system_param, user, max_tokens)
+
+    def complete_text(self, system: str, user: str, *, max_tokens: int) -> str:
+        """Like complete_json but plain text: `system` is sent as-is (no JSON instruction)."""
+        return self._stream(system, user, max_tokens)
+
+    def _stream(self, system_param, user: str, max_tokens: int) -> str:
+        try:
+            import anthropic
+        except ImportError as e:  # pragma: no cover
+            raise LLMError("The 'anthropic' package is not installed.") from e
+
         try:
             client = anthropic.Anthropic(api_key=self.api_key)
             with client.messages.stream(

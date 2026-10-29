@@ -5,10 +5,23 @@ Includes caching, validation, reporting, and file I/O helpers.
 
 import hashlib
 import os
+import sys
 from datetime import datetime
 from typing import Any
 
 import pandas as pd
+
+# llm_client.py lives in the repo root, one level above Normalization/.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from llm_client import ClaudeClient
+
+NORMALIZATION_MODEL = "claude-haiku-5-5"
+
+
+def setup_claude() -> ClaudeClient:
+    """Claude Haiku client for the normalization scripts; key from ANTHROPIC_API_KEY."""
+    return ClaudeClient(NORMALIZATION_MODEL, os.getenv("ANTHROPIC_API_KEY", ""))
+
 
 # ============================================================================
 # CACHING

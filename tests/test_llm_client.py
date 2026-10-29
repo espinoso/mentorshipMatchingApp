@@ -123,3 +123,24 @@ def test_parse_json_surrounding_prose():
 def test_parse_json_garbage_raises(bad):
     with pytest.raises(LLMError):
         parse_json(bad)
+
+
+def test_complete_text_streams_plain_text_without_json_suffix(monkeypatch):
+    monkeypatch.setattr(anthropic, "Anthropic", _FakeAnthropic)
+    out = ClaudeClient("claude-haiku-5-5", "k").complete_text("sys", "usr", max_tokens=20)
+    kw = _FakeAnthropic.last_kwargs
+    assert out == '{"ok": true}'  # joined text blocks, thinking ignored
+    assert "temperature" not in kw
+    assert kw["model"] == "claude-haiku-5-5"
+    assert kw["max_tokens"] == 20
+    assert kw["system"] == "sys"
+    assert kw["messages"] == [{"role": "user", "content": "usr"}]
+
+
+def test_complete_text_truncated_raises_llmerror(monkeypatch):
+    class Truncated(_FakeAnthropic):
+        stop_reason = "max_tokens"
+
+    monkeypatch.setattr(anthropic, "Anthropic", Truncated)
+    with pytest.raises(LLMError, match="cut off"):
+        ClaudeClient("m", "k").complete_text("sys", "usr", max_tokens=10)
