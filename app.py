@@ -1,13 +1,11 @@
-import json
 import os
 import time
 
 import pandas as pd
 import streamlit as st
-from openai import OpenAI
 
 from info import MENTEE_COLUMNS, MENTOR_COLUMNS
-from llm_client import ClaudeClient, LLMError
+from llm_client import ClaudeClient, LLMError, parse_json
 from matching import apply_country_restrictions, parse_matrix_response
 from prompts import create_default_prompt, get_prompt_for_api
 from ui import CSS_STYLES
@@ -19,8 +17,6 @@ from ui_prompt import render_prompt_tab
 from ui_upload import render_upload_tab
 from utils import (
     estimate_output_tokens,
-    extract_openai_answer,
-    get_model_config,
     is_debug_mode,
     show_debug_info,
 )
@@ -135,6 +131,8 @@ def _render_parse_report(report, expected_mentors, expected_mentees):
 
 
 MATRIX_MODEL = "claude-opus-5-5"  # controller ruling: fixed model, not st.session_state.model_choice
+REASONING_MODEL = "claude-opus-5-5"
+REASONING_MAX_TOKENS = 8000
 MATRIX_MAX_OUTPUT_TOKENS = 120000  # headroom under Claude's 128K output cap
 
 
@@ -490,10 +488,13 @@ def generate_matrix_in_batches(mentees_df, mentors_df, api_key=None, model=None,
     return complete_matrix_df
 
 
-def get_reasoning_for_assignments(assignments, mentees_df, mentors_df, api_key, model="gpt-4o-mini"):
-    """Get reasoning for specific assignments via separate API call"""
+def get_reasoning_for_assignments(assignments, mentees_df, mentors_df, api_key=None, model=None):
+    """Get a short reasoning per assignment from Claude; {} on any failure (non-critical).
+
+    api_key/model are ignored (kept for caller compatibility): the model is REASONING_MODEL and
+    the key comes from _anthropic_key().
+    """
     try:
-        client = OpenAI(api_key=api_key)
         
         if not assignments or len(assignments) == 0:
             st.warning("⚠️ No assignments to get reasoning for")
@@ -555,309 +556,48 @@ def get_reasoning_for_assignments(assignments, mentees_df, mentors_df, api_key, 
         if is_debug_mode():
             st.info(f"📝 Extracted details for {len(assignment_details)} assignments")
         
-        prompt = f"""Provide brief reasoning for these {len(assignment_details)} mentorship assignments.
-
-For each assignment, explain in 2-3 sentences why this is a good match based on:
-- Field/specialization alignment
-- Skills compatibility
-- Career goals support
-
-ASSIGNMENTS:
-"""
+        system = (
+            "You are an expert at explaining mentorship compatibility. For each assignment, "
+            "explain in 2-3 sentences why it is a good match based on field/specialization "
+            "alignment, skills compatibility and career goals support.\n\n"
+            'Return a JSON object: {"reasonings": [{"mentee_id": "EXACT_CODE", '
+            '"mentor_id": "EXACT_CODE", "reasoning": "2-3 sentence explanation"}]} '
+            "with one entry per assignment, using the IDs exactly as given."
+        )
+        user = f"ASSIGNMENTS ({len(assignment_details)}):\n"
         for ad in assignment_details:
-            mentee_spec = str(ad.get('mentee_specialization', ''))[:100]
-            mentee_guidance = str(ad.get('mentee_guidance_areas', ''))[:100]
-            mentee_goals = str(ad.get('mentee_goals', ''))[:100]
-            mentee_other = str(ad.get('mentee_other_info', ''))[:100]
-            mentor_spec = str(ad.get('mentor_specialization', ''))[:100]
-            mentor_pos = str(ad.get('mentor_position', ''))[:80]
-            
-            prompt += f"""
+            user += f"""
 {ad['mentee_id']} → {ad['mentor_id']} (Score: {ad['score']}%)
 - Mentee field: {ad['mentee_field']}
-- Mentee specialization: {mentee_spec}...
-- Mentee guidance needs: {mentee_guidance}...
-- Mentee goals: {mentee_goals}...
-- Mentee other info: {mentee_other}...
+- Mentee specialization: {ad['mentee_specialization'][:100]}...
+- Mentee guidance needs: {ad['mentee_guidance_areas'][:100]}...
+- Mentee goals: {ad['mentee_goals'][:100]}...
+- Mentee other info: {ad['mentee_other_info'][:100]}...
 - Mentor field: {ad['mentor_field']}
-- Mentor position: {mentor_pos}...
-- Mentor specialization: {mentor_spec}...
+- Mentor position: {ad['mentor_position'][:80]}...
+- Mentor specialization: {ad['mentor_specialization'][:100]}...
 - Mentor experience: {ad['mentor_experience']} years
-
 """
-        
-        prompt += """
-OUTPUT FORMAT (IMPORTANT):
-Return ONLY a JSON object with this exact structure:
-{
-  "reasonings": [
-    {
-      "mentee_id": "EXACT_CODE",
-      "mentor_id": "EXACT_CODE",
-      "reasoning": "2-3 sentence explanation"
-    }
-  ]
-}
 
-No markdown, no extra text, just the JSON object."""
-        
-        progress_text = st.empty()
-        progress_text.text("🧠 Requesting reasoning from AI...")
-        
-        model_config = get_model_config(model)
-        
-        # Check if Responses API is available
-        if hasattr(client, 'responses'):
-            responses_api = client.responses
-        elif hasattr(client, 'beta') and hasattr(client.beta, 'responses'):
-            responses_api = client.beta.responses
-        else:
-            # Fallback to Chat Completions API
-            responses_api = None
-        
-        model_config = get_model_config(model)
-        
-        # Handle o1/o3/gpt-5-mini/gpt-5-nano models differently
-        is_reasoning_model = model_config.get('is_reasoning_model', False) or model.startswith(("o1-", "o3-"))
-        
-        if responses_api:
-            # Define schema for reasoning - must be object at root level
-            reasoning_schema = {
-                "format": {
-                    "type": "json_schema",
-                    "name": "mentorship_reasoning",
-                    "schema": {
-                        "type": "object",
-                        "properties": {
-                            "reasonings": {
-                                "type": "array",
-                                "description": "Array of reasoning for each assignment",
-                                "items": {
-                                    "type": "object",
-                                    "properties": {
-                                        "mentee_id": {
-                                            "type": "string",
-                                            "description": "The mentee's ID"
-                                        },
-                                        "mentor_id": {
-                                            "type": "string",
-                                            "description": "The mentor's ID"
-                                        },
-                                        "reasoning": {
-                                            "type": "string",
-                                            "description": "Explanation of why this is a good match"
-                                        }
-                                    },
-                                    "required": ["mentee_id", "mentor_id", "reasoning"],
-                                    "additionalProperties": False
-                                }
-                            }
-                        },
-                        "required": ["reasonings"],
-                        "additionalProperties": False
-                    },
-                    "strict": True
-                }
-            }
-            
-            # Retry logic for rate limits
-            max_retries = 5
-            retry_count = 0
-            response = None
-            
-            while retry_count < max_retries:
-                try:
-                    if is_reasoning_model:
-                        full_prompt = "You are an expert at explaining mentorship compatibility. Return only valid JSON.\n\n" + prompt
-                        response = responses_api.create(
-                            model=model,
-                            input=full_prompt,
-                            max_output_tokens=8000,
-                            store=False,
-                            text=reasoning_schema
-                        )
-                    else:
-                        reasoning_params = {
-                            "model": model,
-                            "input": [
-                                {"role": "system", "content": "You are an expert at explaining mentorship compatibility. Return only valid JSON."},
-                                {"role": "user", "content": prompt}
-                            ],
-                            "max_output_tokens": 8000,
-                            "store": False,
-                            "text": reasoning_schema
-                        }
-                        
-                        # Add temperature if model supports it
-                        if model_config['supports_temperature']:
-                            reasoning_params["temperature"] = 0.3
-                        
-                        # Add top_p if model supports it
-                        if model_config.get('supports_top_p', False):
-                            reasoning_params["top_p"] = 0.95
-                        
-                        response = responses_api.create(**reasoning_params)
-                    break
-                    
-                except Exception as e:
-                    error_str = str(e)
-                    
-                    if "rate_limit_exceeded" in error_str or "429" in error_str:
-                        retry_count += 1
-                        
-                        if retry_count >= max_retries:
-                            st.error("❌ Rate limit exceeded on reasoning call")
-                            if is_debug_mode():
-                                st.error(f"❌ Rate limit exceeded on reasoning call after {max_retries} attempts")
-                            return {}
-                        
-                        import re
-                        wait_match = re.search(r'try again in ([\d.]+)s', error_str)
-                        
-                        if wait_match:
-                            wait_time = float(wait_match.group(1))
-                            buffer = 3
-                            total_wait = wait_time + buffer
-                        else:
-                            total_wait = 65
-                        
-                        if is_debug_mode():
-                            st.warning(f"⏳ Rate limit on reasoning call. Waiting {total_wait:.1f}s before attempt {retry_count+1}/{max_retries}...")
-                        else:
-                            st.info(f"⏳ Rate limit reached. Waiting {total_wait:.1f}s...")
-                        time.sleep(total_wait)
-                        continue
-                    else:
-                        st.error("❌ Reasoning API call failed")
-                        if is_debug_mode():
-                            st.error(f"❌ Reasoning API call failed: {e!s}")
-                        return {}
-            
-            if response is None:
-                st.error("❌ Failed to get reasoning response")
-                if is_debug_mode():
-                    st.error("❌ Failed to get reasoning response after retries")
-                return {}
-        else:
-            # Fallback to Chat Completions API
-            token_limit_param = "max_completion_tokens" if is_reasoning_model else "max_tokens"
-            
-            if is_reasoning_model:
-                full_prompt = "You are an expert at explaining mentorship compatibility. Return only valid JSON.\n\n" + prompt
-                response = client.chat.completions.create(
-                    model=model,
-                    messages=[{"role": "user", "content": full_prompt}],
-                    **{token_limit_param: 8000}
-                )
-            else:
-                response = client.chat.completions.create(
-                    model=model,
-                    messages=[
-                        {"role": "system", "content": "You are an expert at explaining mentorship compatibility. Return only valid JSON."},
-                        {"role": "user", "content": prompt}
-                    ],
-                    temperature=0.3,
-                    **{token_limit_param: 8000}
-                )
-        
-        progress_text.text("🧠 Parsing reasoning response...")
-        
-        # Use universal extractor (handles both reasoning and non-reasoning models)
-        try:
-            response_text = extract_openai_answer(response).strip()
-        except ValueError as e:
-            # Fallback to Chat Completions format
-            if hasattr(response, 'choices'):
-                content = response.choices[0].message.content
-                response_text = str(content).strip() if content else ""
-            else:
-                st.error("❌ Could not extract reasoning response")
-                if is_debug_mode():
-                    st.error(f"❌ Could not extract reasoning response: {e!s}")
-                return {}
-        except Exception as e:
-            st.error("❌ Error extracting reasoning response")
-            if is_debug_mode():
-                st.error(f"❌ Unexpected error extracting reasoning response: {e!s}")
-            return {}
-        
-        if is_debug_mode():
-            st.info(f"📝 Received reasoning response ({len(response_text)} characters)")
-            with st.expander("🔍 Debug: View response preview"):
-                st.text(response_text[:500])
-        
-        original_text = response_text
-        response_text = response_text.removeprefix('```json')
-        response_text = response_text.removeprefix('```')
-        response_text = response_text.removesuffix('```')
-        response_text = response_text.strip()
-        
-        try:
-            reasoning_response = json.loads(response_text)
-        except json.JSONDecodeError as parse_error:
-            st.error("❌ JSON parse failed")
-            if is_debug_mode():
-                st.error(f"❌ JSON parse failed: {parse_error}")
-                with st.expander("📄 Full response text"):
-                    st.code(original_text)
-            raise
-        
-        if isinstance(reasoning_response, dict) and 'reasonings' in reasoning_response:
-            reasoning_data = reasoning_response['reasonings']
-        elif isinstance(reasoning_response, list):
-            reasoning_data = reasoning_response
-        else:
-            st.error("❌ Invalid response format")
-            if is_debug_mode():
-                st.error(f"❌ Response is {type(reasoning_response).__name__}, expected object with 'reasonings' array")
-                with st.expander("📄 Parsed data"):
-                    st.json(reasoning_response)
-            raise ValueError("Response should be an object with 'reasonings' array")
-        
-        if not isinstance(reasoning_data, list):
-            st.error("❌ Invalid reasoning format")
-            if is_debug_mode():
-                st.error(f"❌ 'reasonings' is {type(reasoning_data).__name__}, expected list")
-            raise ValueError("'reasonings' should be a list")
-        
-        if is_debug_mode():
-            st.info(f"✅ Parsed {len(reasoning_data)} reasoning entries from JSON")
-        
-        reasoning_dict = {}
-        for idx, r in enumerate(reasoning_data):
-            if 'mentee_id' in r and 'mentor_id' in r and 'reasoning' in r:
-                reasoning_dict[(r['mentee_id'], r['mentor_id'])] = r['reasoning']
-            else:
-                if is_debug_mode():
-                    st.warning(f"⚠️ Entry {idx} missing required fields: {r.keys()}")
-        
-        progress_text.empty()
+        text = ClaudeClient(REASONING_MODEL, _anthropic_key()).complete_json(
+            system, user, max_tokens=REASONING_MAX_TOKENS
+        )
+        data = parse_json(text)
+        entries = data.get("reasonings") if isinstance(data, dict) else data
+        if not isinstance(entries, list):
+            raise LLMError("Reasoning response had no 'reasonings' list.")
+        reasoning_dict = {
+            (r["mentee_id"], r["mentor_id"]): r["reasoning"]
+            for r in entries
+            if isinstance(r, dict) and {"mentee_id", "mentor_id", "reasoning"} <= r.keys()
+        }
         st.success(f"✅ Got reasoning for {len(reasoning_dict)} assignments")
-        
-        if is_debug_mode() and len(reasoning_dict) > 0:
-            sample_keys = list(reasoning_dict.keys())[:3]
-            st.info(f"📋 Sample reasoning keys: {sample_keys}")
-        
         return reasoning_dict
-        
-    except json.JSONDecodeError as e:
-        st.error("❌ JSON parsing error in reasoning")
-        if is_debug_mode():
-            st.error(f"❌ JSON parsing error in reasoning: {e!s}")
-            with st.expander("View raw reasoning response"):
-                try:
-                    st.text(response_text[:2000])
-                except:
-                    st.text("Could not display response")
-        st.info("💡 Continuing with generic reasoning...")
-        return {}
+
     except Exception as e:
         st.error("❌ Error getting reasoning")
         if is_debug_mode():
             st.error(f"❌ Error getting reasoning: {e!s}")
-            import traceback
-            with st.expander("Error details"):
-                st.code(traceback.format_exc())
         st.info("💡 Continuing without detailed reasoning...")
         return {}
 
