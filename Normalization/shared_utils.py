@@ -5,6 +5,7 @@ Includes caching, validation, reporting, and file I/O helpers.
 
 import hashlib
 import os
+import re
 import sys
 from datetime import datetime
 from typing import Any
@@ -21,6 +22,59 @@ NORMALIZATION_MODEL = "claude-haiku-5-5"
 def setup_claude() -> ClaudeClient:
     """Claude Haiku client for the normalization scripts; key from ANTHROPIC_API_KEY."""
     return ClaudeClient(NORMALIZATION_MODEL, os.getenv("ANTHROPIC_API_KEY", ""))
+
+
+# ============================================================================
+# DETERMINISTIC NORMALIZATION (no LLM)
+# ============================================================================
+
+# Checked in order, first hit wins (highest level first, so "Bachelors and Masters" -> Masters).
+# "posgrad" is listed so Spanish "posgrado" is caught as Masters before "grado" reads it as Bachelors.
+_LEVEL_KEYWORDS = (
+    ("PhD", ("phd", "ph.d", "d.phil", "dphil", "doctor")),
+    ("Masters", ("master", "máster", "m.sc", "msc", "mba", "maestr", "postgrad", "posgrad", "mphil")),
+    ("Bachelors", ("bachelor", "b.sc", "bsc", "licenc", "grado", "undergrad", "pregrado")),
+    ("High School", ("high school", "secondary", "bachillerato", "preparatoria", "secundaria")),
+)
+
+
+def classify_education_level(text) -> str:
+    """Map free text (EN/ES) to PhD, Masters, Bachelors, High School, or N/A by keyword."""
+    if pd.isna(text):
+        return "N/A"
+    lowered = str(text).lower()
+    for level, keywords in _LEVEL_KEYWORDS:
+        if any(k in lowered for k in keywords):
+            return level
+    return "N/A"
+
+
+def extract_program_specialization(program) -> str:
+    """Cheap field-of-study extraction: 'PhD in Computer Science' -> 'Computer Science'.
+
+    shortcut: only '<level> in/en/of/de X' and level-free text are handled; 'Master Data Science'
+    (no preposition) yields '' -- upgrade if that pattern turns out to be common.
+    """
+    if pd.isna(program):
+        return ""
+    text = str(program).strip()
+    m = re.search(r"\b(?:in|en|of|de|del)\b\s+(.+)", text, re.IGNORECASE)
+    if m and classify_education_level(text[:m.start()]) != "N/A":
+        return m.group(1).strip()
+    return text if classify_education_level(text) == "N/A" else ""
+
+
+def merge_skill_sources(*sources) -> str:
+    """Split sources on [,;/\\n], lowercase, drop empties/'n/a'/'error', dedupe in first-seen order."""
+    seen: dict[str, None] = {}
+    for source in sources:
+        if source is None or pd.isna(source):
+            continue
+        for part in re.split(r"[,;/\n]", re.sub(r"\bn/a\b", "", str(source), flags=re.IGNORECASE)):
+            term = part.strip().lower()
+            if term and "error" not in term:
+                seen.setdefault(term)
+    return ", ".join(seen) or "N/A"
 
 
 # ============================================================================

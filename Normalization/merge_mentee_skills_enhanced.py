@@ -14,17 +14,18 @@ import pandas as pd
 from shared_utils import (
     AICache,
     TransformationReport,
+    classify_education_level,
     clean_dataframe,
+    extract_program_specialization,
     find_column_flexible,
     find_missing_data,
     generate_output_filename,
+    merge_skill_sources,
     read_input_sheet,
     setup_claude,
     validate_required_columns,
     write_error_log,
 )
-
-from llm_client import parse_json
 
 # Import normalization utilities
 from normalization import (
@@ -76,82 +77,54 @@ def _clean(value) -> str:
     return "" if text.upper() == "N/A" else text
 
 
-def normalize_mentee_row(education_level, current_program, original_field, specialization,
-                         hard_skills, client, cache: AICache, row_num: int) -> dict:
+def classify_mentee_field(original_field, current_program, client, cache: AICache, row_num: int) -> str:
     """
-    ONE Claude call that normalizes a mentee's education level, program level,
-    broad field of expertise and merged skills (replaces four sequential calls).
-    Returns: {"education_level", "program_level", "field_of_expertise", "skills"}
+    The only per-row LLM call for mentees: BROAD field of expertise (1-3 words).
+    Level normalization and the skills merge are deterministic (see shared_utils).
     With caching support.
     """
-    edu, prog, field, spec, skills = (
-        _clean(v) for v in (education_level, current_program, original_field, specialization, hard_skills)
-    )
-    if not (edu or prog or field or spec or skills):
-        return {"education_level": "N/A", "program_level": "N/A",
-                "field_of_expertise": "N/A", "skills": "N/A"}
+    field, program = _clean(original_field), _clean(current_program)
+    if not field and not program:
+        return "N/A"
 
-    cache_key = cache.get_cache_key(f"mentee_row|{edu}|{prog}|{field}|{spec}|{skills}")
+    cache_key = cache.get_cache_key(f"mentee_field|{field}|{program}")
     cached_result = cache.get(cache_key)
     if cached_result is not None:
-        print(f"Row {row_num}: Profile normalized (cached)")
-        return dict(cached_result)
+        print(f"Row {row_num}: Field of expertise (cached): '{cached_result}'")
+        return cached_result
 
-    prompt = f"""You are normalizing one mentee's profile for a mentorship matching program. From the raw fields below, produce a clean, structured profile.
+    prompt = f"""You are an academic field classifier. Based on the information provided, determine the BROAD field of expertise category.
 
-Raw fields:
-- Highest education level: "{edu}"
-- Current education program: "{prog}"
-- Original field of expertise: "{field}"
-- Specialization: "{spec}"
-- Hard skills: "{skills}"
+Original Field of Expertise: {field}
+Current Education Program: {program}
 
-Return ONLY a JSON object with exactly these keys:
-{{
-  "education_level": one of exactly "Masters", "PhD", "High School", "Bachelors" — map the highest education level (closest match if unclear).
-  "program_level": one of exactly "PhD", "Masters", "Bachelors" — the level of the CURRENT program; "N/A" if none stated.
-  "field_of_expertise": the BROAD academic/professional field category, 1-3 words, properly capitalized (e.g. "Biomedicine", "Computer Science"), inferred from the original field and the current program.
-  "specialization_extracted": the field of study from the current program (short phrase), or "N/A".
-  "skills": a SINGLE comma-separated list of normalized keywords merged from the original field, the program specialization, the specialization field, and the hard skills. Lowercase; standardize terminology (AI→artificial intelligence, ML→machine learning); remove exact duplicates; order broader→more specific.
-}}"""
+Your task:
+- Identify the BROAD academic/professional field category
+- Examples of broad categories: Biomedicine, Mechanical Engineering, Computer Science, Business, Law, Psychology, Physics, Chemistry, etc.
+- Return ONLY the broad category name (1-3 words maximum), nothing else
+- Capitalize properly (e.g., "Computer Science" not "computer science")
+
+Return only the broad field category:"""
 
     for attempt in range(MAX_RETRIES):
         try:
-            raw = client.complete_text(
-                "You return only a JSON object with the requested keys.", prompt, max_tokens=600
-            )
-            parsed = parse_json(raw)
-
-            education = str(parsed.get("education_level", "")).strip()
-            if education not in ("Masters", "PhD", "High School", "Bachelors"):
-                education = edu or "N/A"  # unexpected value: keep original, as before
-            field_out = str(parsed.get("field_of_expertise", "")).strip('."\' ') or field or "N/A"
-            skills_out = parsed.get("skills", "")
-            if isinstance(skills_out, list):
-                skills_out = ", ".join(str(s) for s in skills_out)
-            skills_out = str(skills_out).replace("\n", " ").replace("  ", " ").strip('."\' ') or "N/A"
-
-            result = {
-                "education_level": education,
-                "program_level": str(parsed.get("program_level", "ERROR")).strip(),
-                "field_of_expertise": field_out,
-                "skills": skills_out,
-            }
+            result = client.complete_text(
+                "You only return a single broad academic/professional field category. Maximum 3 words. Proper capitalization.",
+                prompt,
+                max_tokens=20,
+            ).strip('."\' \n')
+            if not result:
+                raise ValueError("empty response")
             cache.set(cache_key, result)
-            print(f"Row {row_num}: Profile normalized")
-            return dict(result)
-        except Exception as e:  # LLMError (transport or unparseable JSON) or malformed shape
-            print(f"Row {row_num}: Profile normalization attempt {attempt + 1} failed: {e!s}")
+            print(f"Row {row_num}: Field of expertise determined as '{result}'")
+            return result
+        except Exception as e:
+            print(f"Row {row_num}: Field determination attempt {attempt + 1} failed: {e!s}")
             if attempt < MAX_RETRIES - 1:
                 time.sleep(RETRY_DELAY)
 
-    print(f"Row {row_num}: All retries failed. Keeping original data.")
-    return {
-        "education_level": edu or "N/A",
-        "program_level": prog or "N/A",  # original text; pattern step flags it for review
-        "field_of_expertise": field or "N/A",
-        "skills": ", ".join(t for t in (field, spec, skills) if t).lower() or "N/A",
-    }
+    print(f"Row {row_num}: All retries failed. Using original field.")
+    return field or "N/A"
 
 
 def find_pre_columns(df: pd.DataFrame) -> dict:
@@ -288,7 +261,7 @@ def process_mentee_file(input_file: str, output_file: str = None, dry_run: bool 
     # Save original Field of expertise for merging (before we overwrite it)
     original_field_of_expertise = df[pre_cols['field']].copy() if pre_cols['field'] else pd.Series(["N/A"] * len(df))
     
-    # Normalize education, program level, broad field and skills in ONE pass (one LLM call per row)
+    # Levels and skills are computed in code; the one LLM call per row classifies the broad field
     print("\n5. Normalizing profiles (fields, skills, education)...")
     print("-" * 80)
     total_rows = len(df)
@@ -304,22 +277,21 @@ def process_mentee_file(input_file: str, output_file: str = None, dry_run: bool 
         print(f"[{idx + 1}/{total_rows}]", end=" ", flush=True)
 
         try:
-            profile = normalize_mentee_row(
-                education_level, current_program, original_field, specialization, hard_skills,
-                client, cache, idx + 1
+            education = classify_education_level(education_level)
+            if education == "N/A":  # keyword miss: fall back to the pattern table (also logs for review)
+                education = normalize_education_level_with_patterns(education_level, unmapped_education_levels)
+            level = classify_education_level(current_program)
+            if level == "N/A":
+                level = normalize_education_level_with_patterns(current_program, unmapped_program_levels)
+            skills = merge_skill_sources(
+                original_field, extract_program_specialization(current_program), specialization, hard_skills
             )
-            # Pattern normalization catches any variations the model returns
-            education = normalize_education_level_with_patterns(profile["education_level"], unmapped_education_levels)
-            level = profile["program_level"]
-            # Handle "P", "B", "ERROR: No level found", etc.
-            if "ERROR" in str(level) or "No level found" in str(level):
-                level = "N/A"
-            else:
-                level = normalize_education_level_with_patterns(level, unmapped_program_levels)
+            broad_field = classify_mentee_field(original_field, current_program, client, cache, idx + 1)
+
             normalized_education.append(education)
             split_levels.append(level)
-            broad_fields.append(profile["field_of_expertise"])
-            merged_skills.append(profile["skills"])
+            broad_fields.append(broad_field)
+            merged_skills.append(skills)
             for op in ('education_levels_normalized', 'education_programs_split',
                        'fields_classified', 'skills_merged'):
                 report.record_operation(op)
