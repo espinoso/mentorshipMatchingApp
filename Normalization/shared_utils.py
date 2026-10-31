@@ -49,6 +49,35 @@ def classify_education_level(text) -> str:
     return "N/A"
 
 
+def _is_blank(text) -> bool:
+    return pd.isna(text) or str(text).strip().lower() in ("", "n/a", "nan", "none")
+
+
+def classify_level_llm(text, client, cache) -> str:
+    """LLM fallback for education-level classification (Haiku), used only when the deterministic
+    keyword + pattern layers can't place a present-but-unusual value. Blank in → N/A with no call.
+    Cached, and fails safe to N/A."""
+    if _is_blank(text):
+        return "N/A"
+    key = cache.get_cache_key(f"level|{text}")
+    cached = cache.get(key)
+    if cached is not None:
+        return cached
+    valid = {"Masters", "PhD", "High School", "Bachelors", "N/A"}
+    try:
+        result = client.complete_text(
+            "You return only one of these exact words: Masters, PhD, High School, Bachelors, N/A. Nothing else.",
+            f'Map this education description to exactly one of Masters, PhD, High School, Bachelors '
+            f'(or N/A if it is genuinely none of these): "{str(text).strip()}"',
+            max_tokens=10,
+        ).strip()
+        result = result if result in valid else "N/A"
+    except Exception:
+        result = "N/A"
+    cache.set(key, result)
+    return result
+
+
 def extract_program_specialization(program) -> str:
     """Cheap field-of-study extraction: 'PhD in Computer Science' -> 'Computer Science'.
 
@@ -64,15 +93,22 @@ def extract_program_specialization(program) -> str:
     return text if classify_education_level(text) == "N/A" else ""
 
 
+_FILLER_LABEL = re.compile(r"^(interests?|skills?|specialization|areas?|expertise|fields?)\s*:\s*", re.IGNORECASE)
+
+
 def merge_skill_sources(*sources) -> str:
-    """Split sources on [,;/\\n], lowercase, drop empties/'n/a'/'error', dedupe in first-seen order."""
+    """Merge skill/field sources into a deduped keyword list. Splits on commas, semicolons,
+    slashes, pipes, bullets, newlines and sentence periods; strips filler label prefixes
+    ('interests:'); drops empties, 'n/a', 'error' terms and pure-number fragments; lowercases
+    and dedupes in first-seen order."""
     seen: dict[str, None] = {}
     for source in sources:
         if source is None or pd.isna(source):
             continue
-        for part in re.split(r"[,;/\n]", re.sub(r"\bn/a\b", "", str(source), flags=re.IGNORECASE)):
-            term = part.strip().lower()
-            if term and "error" not in term:
+        cleaned = re.sub(r"\bn/a\b", "", str(source), flags=re.IGNORECASE)
+        for part in re.split(r"[,;/|•\n]|\.\s+", cleaned):
+            term = _FILLER_LABEL.sub("", part.strip().lower()).strip(" .")
+            if term and "error" not in term and not term.isdigit():
                 seen.setdefault(term)
     return ", ".join(seen) or "N/A"
 

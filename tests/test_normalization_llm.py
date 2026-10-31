@@ -64,6 +64,20 @@ def test_merge_skill_sources_splits_dedupes_and_drops_junk():
     assert shared_utils.merge_skill_sources("", "N/A", None) == "N/A"
 
 
+def test_unrecognized_level_falls_back_to_llm():
+    # A present-but-unusual level the keyword list doesn't know -> LLM fallback classifies it.
+    c, cache = FakeClaude("PhD"), AICache()
+    assert shared_utils.classify_level_llm("quux doctoral fellowship", c, cache) == "PhD"
+    assert len(c.calls) == 1
+    # Blank input never calls the model.
+    assert shared_utils.classify_level_llm("", c, cache) == "N/A"
+    assert shared_utils.classify_level_llm(float("nan"), c, cache) == "N/A"
+    assert len(c.calls) == 1
+    # An invalid model reply degrades to N/A, not garbage.
+    bad = FakeClaude("not a level")
+    assert shared_utils.classify_level_llm("mystery credential", bad, AICache()) == "N/A"
+
+
 def test_mentee_field_single_call_shape_and_budget():
     c = FakeClaude('"Computer Science".')
     assert mentee.classify_mentee_field("cs", "PhD ML", c, AICache(), 1) == "Computer Science"
@@ -129,16 +143,16 @@ def test_process_mentee_file_one_field_call_and_progress_pass_per_row(tmp_path, 
     path = tmp_path / "mentees.xlsx"
     pd.DataFrame({
         "Highest educational level completed": ["MSc", "Licenciatura"],
-        "Current education program": ["PhD in Machine Learning", "Law"],
+        "Current education program": ["PhD in Machine Learning", "PhD"],
         "Field of expertise": ["cs", "law"],
         "Specialization": ["ml; NLP", "contracts"],
         "Specific hard skills": ["python", "writing, Law"],
     }).to_excel(path, index=False)
     c = FakeClaude("Computer Science")
     df, _, _ = mentee.process_mentee_file(str(path), dry_run=True, client=c, cache=AICache())
-    assert len(c.calls) == 2  # one field call per row, nothing else
+    assert len(c.calls) == 2  # all levels keyword-recognized -> one FIELD call per row, no level LLM
     assert df["Mentee Highest educational level completed"].tolist() == ["Masters", "Bachelors"]
-    assert df["Mentee Current education program"].tolist() == ["PhD", "N/A"]
+    assert df["Mentee Current education program"].tolist() == ["PhD", "PhD"]
     assert df["Mentee Field of expertise"].tolist() == ["Computer Science"] * 2
     assert df["Mentee Specialization"].tolist() == [
         "cs, machine learning, ml, nlp, python",

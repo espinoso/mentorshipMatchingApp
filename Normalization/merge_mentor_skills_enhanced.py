@@ -18,6 +18,7 @@ from shared_utils import (
     AICache,
     TransformationReport,
     classify_education_level,
+    classify_level_llm,
     clean_dataframe,
     extract_program_specialization,
     find_column_flexible,
@@ -258,8 +259,10 @@ def process_mentor_file(input_file: str, output_file: str = None, dry_run: bool 
                 field, client, cache, idx + 1, unmapped_fields
             )
             level = classify_education_level(education_text)
-            if level == "N/A":  # keyword miss: fall back to the pattern table
+            if level == "N/A":  # keyword miss: try the pattern table
                 level = normalize_education_level_with_patterns(education_text)
+            if level == "N/A":  # still unknown and present: LLM fallback
+                level = classify_level_llm(education_text, client, cache)
             # Order: broader -> specific (field terms, education field, institution type, specialization, skills)
             skills = merge_skill_sources(
                 ", ".join(field_terms),

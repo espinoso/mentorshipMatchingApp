@@ -15,6 +15,7 @@ from shared_utils import (
     AICache,
     TransformationReport,
     classify_education_level,
+    classify_level_llm,
     clean_dataframe,
     extract_program_specialization,
     find_column_flexible,
@@ -278,11 +279,15 @@ def process_mentee_file(input_file: str, output_file: str = None, dry_run: bool 
 
         try:
             education = classify_education_level(education_level)
-            if education == "N/A":  # keyword miss: fall back to the pattern table (also logs for review)
+            if education == "N/A":  # keyword miss: try the pattern table (also logs for review)
                 education = normalize_education_level_with_patterns(education_level, unmapped_education_levels)
+            if education == "N/A":  # still unknown and present: LLM fallback
+                education = classify_level_llm(education_level, client, cache)
             level = classify_education_level(current_program)
             if level == "N/A":
                 level = normalize_education_level_with_patterns(current_program, unmapped_program_levels)
+            if level == "N/A":
+                level = classify_level_llm(current_program, client, cache)
             skills = merge_skill_sources(
                 original_field, extract_program_specialization(current_program), specialization, hard_skills
             )
