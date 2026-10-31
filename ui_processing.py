@@ -76,7 +76,7 @@ def _back_to_generate():
     """Enabled escape hatch shown on any dead-end run, so the locked rail can't trap the user."""
     if st.button("← Back to Generate", key="back_to_generate"):
         st.session_state["start_processing"] = False
-        st.session_state["step"] = 4
+        st.session_state["step"] = 2  # Generate
         st.rerun()
 
 

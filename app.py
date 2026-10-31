@@ -9,14 +9,13 @@ from llm_client import ClaudeClient, LLMError, parse_json
 from matching import apply_country_restrictions, parse_matrix_response
 from prompts import create_default_prompt, get_prompt_for_api
 from ui import CSS_STYLES
-from ui_config import render_config_tab
 from ui_matches import render_matches_tab
 from ui_overview import render_overview_tab
 from ui_processing import render_processing_tab
-from ui_prompt import render_prompt_tab
-from ui_upload import render_upload_tab
+from ui_upload import LOG_CONTAINER_CSS, render_upload_tab
 from utils import (
     estimate_output_tokens,
+    fetch_available_models,
     is_debug_mode,
     show_debug_info,
 )
@@ -26,10 +25,11 @@ st.set_page_config(
     page_title="Mentorship Matching System",
     page_icon="🤝",
     layout="wide",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="expanded"
 )
 
 st.markdown(CSS_STYLES, unsafe_allow_html=True)
+st.markdown(LOG_CONTAINER_CSS, unsafe_allow_html=True)  # loaded once, not per-step (avoids a spacer gap)
 
 
 def _render_parse_report(report, expected_mentors, expected_mentees):
@@ -614,15 +614,15 @@ def get_reasoning_for_assignments(assignments, mentees_df, mentors_df):
 
 # --------------------------------------------------------------------------- navigation + rail
 
-_STEPS = ["Configure", "Upload", "Customize Prompt", "Data Overview", "Generate", "Results"]
+_STEPS = ["Upload", "Data Overview", "Generate", "Results"]
 
 
 def _reachable(has_data: bool, has_results: bool) -> set[int]:
-    s = {0, 1, 2}
+    s = {0}  # Upload is always reachable
     if has_data:
-        s |= {3, 4}
-        if has_results:
-            s.add(5)
+        s |= {1, 2}  # Data Overview, Generate
+    if has_results:
+        s.add(3)  # Results
     return s
 
 
@@ -630,7 +630,7 @@ def _resolve_step(has_data: bool, has_results: bool) -> int:
     """Stored step clamped into what's reachable (e.g. a new upload clears results)."""
     step = st.session_state.get("step", 0)
     if step not in _reachable(has_data, has_results):
-        step = 4 if has_data else 1
+        step = 2 if has_data else 0
         st.session_state["step"] = step
     return step
 
@@ -654,6 +654,44 @@ def render_rail(current: int, has_data: bool, has_results: bool, clickable: bool
             on_click=_nav_to if enabled else None,
             args=(i,) if enabled else None,
         )
+
+
+def render_sidebar() -> None:
+    """Settings live here, not as wizard steps: the few knobs an organizer touches, plus an
+    Advanced section for the model and the raw scoring rubric (power users only)."""
+    with st.sidebar:
+        st.header("⚙️ Settings")
+        st.session_state.max_mentees_per_mentor = st.number_input(
+            "Max mentees per mentor",
+            min_value=1,
+            max_value=3,
+            value=st.session_state.get("max_mentees_per_mentor", 2),
+            step=1,
+            help="The most mentees a single mentor can be assigned. Enforced during optimal assignment.",
+        )
+        restrict_spain = st.checkbox(
+            "Spain ↔ Spain restriction",
+            value="spain" in st.session_state.get("country_restrictions", ["spain"]),
+            help="Don't match Spanish mentors to Spanish mentees. Needs a country column in the data.",
+        )
+        st.session_state.country_restrictions = ["spain"] if restrict_spain else []
+
+        with st.expander("Advanced", expanded=False):
+            models = list(fetch_available_models())
+            if st.session_state.get("model_choice") not in models:
+                st.session_state.model_choice = DEFAULT_MODEL
+            st.session_state.model_choice = st.selectbox(
+                "Claude model",
+                models,
+                index=models.index(st.session_state.model_choice),
+                help="Model used to score compatibility and write the reasoning. The default is recommended.",
+            )
+            st.session_state.custom_prompt = st.text_area(
+                "Scoring rubric",
+                value=st.session_state.custom_prompt,
+                height=240,
+                help="The exact scoring instructions sent to the model. The default is tuned — edit only if you know what you're doing.",
+            )
 
 
 def main():
@@ -770,22 +808,29 @@ def main():
     if 'api_key' not in st.session_state:
         st.session_state.api_key = _anthropic_key()
     
+    if not st.session_state.api_key:
+        st.error(
+            "❌ **Missing API key.** Set `ANTHROPIC_API_KEY` (environment variable or Streamlit "
+            "secrets) to use the app."
+        )
+        st.stop()
+
+    render_sidebar()
+
     has_data = (
         st.session_state.get("mentees_df") is not None
         and st.session_state.get("mentors_df") is not None
     )
     has_results = st.session_state.get("matches") is not None
     if st.session_state.get("start_processing"):
-        render_rail(5, has_data, has_results, clickable=False)  # locked: a stray click can't derail the run
+        render_rail(3, has_data, has_results, clickable=False)  # locked: a stray click can't derail the run
         render_processing_tab()  # runs the pipeline this rerun, then clears start_processing
         return
     step = _resolve_step(has_data, has_results)
     render_rail(step, has_data, has_results)
 
     (
-        render_config_tab,
         render_upload_tab,
-        render_prompt_tab,
         render_overview_tab,
         render_matches_tab,
         render_processing_tab,

@@ -593,21 +593,10 @@ def render_file_upload_section(file_type: FileType, any_processing: bool, other_
 def render_upload_tab():
     """Render Tab 3: Upload Mentee & Mentor Files"""
     
-    # Check for API key
-    if not st.session_state.api_key:
-        render_html_card(
-            "⚠️ <strong>API Key Required</strong><br>"
-            "Please set ANTHROPIC_API_KEY (see the Configure step) before uploading data files.",
-            "conflict-warning"
-        )
-        st.stop()
-    
-    # Initialize session state
+    # Initialize session state (the API key is guaranteed by main()'s gate; LOG_CONTAINER_CSS
+    # is injected once globally in app.py, not here, so this step has no leading spacer).
     init_session_state()
-    
-    # Inject CSS
-    st.markdown(LOG_CONTAINER_CSS, unsafe_allow_html=True)
-    
+
     # Info card
     render_html_card(
         "Upload your mentee and mentor Excel files. Both files are required to proceed with matching."

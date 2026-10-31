@@ -152,7 +152,7 @@ def render_matches_tab():
         # Start the run and jump to Results; main() locks the rail while it runs
         if st.button("🚀 Generate Matches", type="primary", width='stretch'):
             st.session_state.start_processing = True
-            st.session_state["step"] = 5
+            st.session_state["step"] = 3  # Results
             st.rerun()
     
     except Exception as e:
