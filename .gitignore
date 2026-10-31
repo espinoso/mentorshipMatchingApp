@@ -128,8 +128,8 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
-# Streamlit specific
-.streamlit/
+# Streamlit specific — ignore local secrets only, NOT the committed theme/config.
+.streamlit/secrets.toml
 
 # IDE specific files
 .vscode/

@@ -761,13 +761,11 @@ def main():
     if 'debug_mode' not in st.session_state:
         import os
         debug_env = os.getenv('DEBUG_MODE', '').upper().strip()
-        if debug_env == 'FALSE':
-            st.session_state.debug_mode = False
-        elif debug_env == 'TRUE':
+        if debug_env == 'TRUE':
             st.session_state.debug_mode = True
         else:
-            # Default: ON if env var not present or invalid
-            st.session_state.debug_mode = True
+            # Default: OFF (production). Set DEBUG_MODE=TRUE to expose token/cost internals.
+            st.session_state.debug_mode = False
     
     if 'api_key' not in st.session_state:
         st.session_state.api_key = _anthropic_key()

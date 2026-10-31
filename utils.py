@@ -287,30 +287,21 @@ def is_debug_mode():
     Check if debug mode is enabled based on DEBUG_MODE environment variable.
     
     Logic:
-    - If DEBUG_MODE env var not present → debug_mode = True (ON by default)
     - If DEBUG_MODE = "TRUE" → debug_mode = True
-    - If DEBUG_MODE = "FALSE" → debug_mode = False
-    - Otherwise → defaults to True
-    
+    - Otherwise (env var absent, "FALSE", or invalid) → debug_mode = False (OFF by default)
+
     Returns:
         bool: True if debug mode is enabled, False otherwise
     """
     import os
-    
+
     # Check session state first (if already initialized)
     if 'debug_mode' in st.session_state:
         return st.session_state.debug_mode
-    
-    # Read from environment variable
+
+    # Read from environment variable; default OFF in production.
     debug_env = os.getenv('DEBUG_MODE', '').upper().strip()
-    
-    if debug_env == 'FALSE':
-        return False
-    elif debug_env == 'TRUE':
-        return True
-    else:
-        # Default: ON if env var not present or invalid
-        return True
+    return debug_env == 'TRUE'
 
 
 def format_time(seconds):
