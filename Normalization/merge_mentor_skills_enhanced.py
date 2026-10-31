@@ -133,7 +133,7 @@ def process_mentor_file(input_file: str, output_file: str = None, dry_run: bool 
     pre_cols = find_pre_columns(df)
     
     # Verify critical columns found
-    critical_cols = ['education_level', 'field', 'specialization', 'hard_skills', 'institution_type']
+    critical_cols = ['education_level', 'field', 'specialization', 'hard_skills']  # institution_type is optional (not in every survey)
     missing_critical = [key for key in critical_cols if pre_cols[key] is None]
     
     if missing_critical:

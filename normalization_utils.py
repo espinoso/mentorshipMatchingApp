@@ -165,7 +165,7 @@ def validate_pre_format_columns(df: pd.DataFrame, file_type: str) -> tuple[bool,
             'career_dev_experience': ['areas where you feel comfortable mentoring', 'comfortable mentoring']
         }
         # Critical columns for mentors (must be present)
-        critical_columns = ['education_level', 'field', 'specialization', 'hard_skills', 'institution_type']
+        critical_columns = ['education_level', 'field', 'specialization', 'hard_skills']  # institution_type is optional (not in every survey)
     
     # Use find_column_flexible to check for columns (same logic as normalization scripts)
     missing_columns = []
