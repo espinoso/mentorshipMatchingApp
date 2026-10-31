@@ -1,0 +1,20 @@
+# Streamlit theme — IMFAHE brand (red #E6122C on white, warm-gray text).
+# Palette matches ui.py CSS_STYLES; mirrors the Peer Mentoring deploy.
+[theme]
+base = "light"
+primaryColor = "#E6122C"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F2F2F2"
+textColor = "#3A3A3A"
+linkColor = "#C31313"
+borderColor = "#E2E2E2"
+baseRadius = "0.625rem"
+
+[server]
+# Production defaults. Keep XSRF protection ON here — the devcontainer disables it
+# only for the Codespaces preview proxy; the deployed app (Streamlit Cloud) must not.
+headless = true
+enableXsrfProtection = true
+
+[browser]
+gatherUsageStats = false

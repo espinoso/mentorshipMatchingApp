@@ -1,187 +1,103 @@
 # 🤝 Mentorship Matching System
 
-An AI-powered web application that intelligently matches mentees with mentors based on expertise, skills, career goals, and professional experience. Built with Streamlit and powered by OpenAI's GPT models.
+An AI-powered Streamlit app that matches mentees to mentors for IMFAHE's International Mentor Program (IMP), based on field, specialization, skills, guidance needs, and career goals. It pairs **Claude** (for fuzzy compatibility scoring and per-match reasoning) with a **Hungarian assignment** solver (for a provably optimal set of pairings), so matching is both nuanced and optimal.
 
-## 🌟 Features
+## How it works
 
-- **Intelligent Matching**: Uses AI to analyze compatibility between mentees and mentors
-- **Flexible Data Input**: Supports Excel file uploads for mentees, mentors, and training data
-- **Customizable Prompts**: Modify AI matching criteria through an intuitive interface
-- **Conflict Detection**: Automatically identifies mentor assignment conflicts
-- **Interactive Results**: Browse matches with detailed reasoning and match percentages
-- **Export Functionality**: Download comprehensive Excel reports
-- **Sample Data**: Built-in sample data for testing and demonstration
+1. **Normalize** — messy Excel form exports are cleaned into a consistent schema (a Claude Haiku pass classifies fields and merges skills).
+2. **Score** — Claude (Opus) scores every mentee × mentor pair 0–100 into a compatibility matrix, batched and streamed with an output-token budget so large cohorts don't truncate.
+3. **Assign** — SciPy's Hungarian algorithm (`linear_sum_assignment`) computes the optimal assignment, honoring a configurable mentees-per-mentor cap and an optional same-country restriction.
+4. **Explain** — a second Claude call writes a short reasoning for each pairing; results show scores, reasoning, conflicts, and a heatmap, and export to Excel.
 
-## 🚀 Quick Start
+## Using the app (guided wizard)
 
-### Prerequisites
+The app walks an organizer through numbered steps; each unlocks once its data exists:
 
-- Python 3.7 or higher
-- OpenAI API key
+1. **Configure** — confirm the API key, pick the Claude model, set max mentees per mentor, and toggle the Spain ↔ Spain restriction.
+2. **Upload** — upload the mentee and mentor Excel files.
+3. **Customize Prompt** — optionally edit the matching rubric.
+4. **Data Overview** — preview the normalized data.
+5. **Generate** — run the match (the step rail locks while it runs; a "← Back to Generate" button is always available if a run can't proceed).
+6. **Results** — browse pairings, reasoning, conflicts, and the heatmap; download the Excel report.
 
-### Installation
+## Data requirements
 
-1. **Clone the repository**
-   ```bash
-   git clone <repository-url>
-   cd llmWebInterface
-   ```
+The mentee/mentor files are the program's standard Excel exports; the normalization pass tolerates blank leading rows and column-name drift. Core columns:
 
-2. **Install dependencies**
-   ```bash
-   pip install -r requirements.txt
-   ```
+**Mentees:** `Code Mentee`, `Mentee Field of expertise`, `Mentee Specialization`, `Mentee Specific hard skills that you have`, `Mentee Areas where guidance is needed`, `Mentee Career goals for the next 2 years`.
 
-3. **Run the application**
-   ```bash
-   streamlit run app.py
-   ```
+**Mentors:** `Code mentor`, `Field of expertise`, `Mentor Specialization`, `Mentor Specific Hard Skills and Professional Competencies has Mastered`, `Mentor Years of Professional Experience in his her Field`, `Mentor Type of Institution`.
 
-4. **Open your browser**
-   Navigate to `http://localhost:8501`
+Files are `.xlsx`. Real sample files live outside the repo (gitignored `samples/`), since they contain applicant data.
 
-## 📋 Data Requirements
+## Running locally
 
-### Mentee File Structure
-Your mentee Excel file should contain the following columns:
-- `Code Mentee` - Unique identifier for the mentee
-- `Mentee Field of expertise` - Primary field of study/work
-- `Mentee Specialization` - Specific area within the field
-- `Mentee Specific hard skills that you have` - Technical skills and competencies
-- `Mentee Areas where guidance is needed` - What the mentee wants to learn
-- `Mentee Career goals for the next 2 years` - Short-term career objectives
+Requires **Python 3.11**.
 
-### Mentor File Structure
-Your mentor Excel file should contain the following columns:
-- `Code mentor` - Unique identifier for the mentor
-- `Field of expertise` - Primary field of expertise
-- `Mentor Specialization` - Specific areas of specialization
-- `Mentor Specific Hard Skills and Professional Competencies has Mastered` - Skills and competencies
-- `Mentor Years of Professional Experience in his her Field` - Years of experience
-
-### Training Files (Optional)
-Upload historical mentorship data to improve matching accuracy. These files should contain both mentee and mentor information from successful past matches.
-
-## 🎯 How to Use
-
-### 1. Upload Data
-- **Training Files**: Upload historical mentorship data (optional but recommended)
-- **Mentees File**: Upload your mentee data in Excel format
-- **Mentors File**: Upload your mentor data in Excel format
-
-### 2. Configure AI
-- Enter your OpenAI API key
-- Optionally customize the matching prompt in the "Customize Prompt" tab
-
-### 3. Generate Matches
-- Click "Generate Matches" to run the AI matching algorithm
-- Review results and check for any mentor assignment conflicts
-
-### 4. Export Results
-- Download comprehensive Excel reports with all matching results
-- Reports include match percentages, reasoning, and original data
-
-## 🔧 Customization
-
-### Modifying Matching Criteria
-You can customize the AI's matching behavior by editing the prompt in the "Customize Prompt" tab. The default prompt considers:
-
-- Field of expertise alignment
-- Specialization overlap
-- Hard skills compatibility
-- Career goals alignment
-- Guidance needs matching
-- Professional experience appropriateness
-
-### Sample Data
-Use the "Use Sample Data" button to test the system with pre-loaded sample data that demonstrates the expected format and functionality.
-
-## 📊 Output Format
-
-The system generates matches in the following format:
-```json
-{
-  "mentee_id": "Mentee_A1",
-  "matches": [
-    {
-      "rank": 1,
-      "mentor_id": "Mentor_X1",
-      "match_percentage": 85,
-      "match_quality": "Excellent",
-      "reasoning": "Detailed explanation of compatibility..."
-    }
-  ]
-}
+```bash
+git clone git@github.com:espinoso/mentorshipMatchingApp.git
+cd mentorshipMatchingApp
+python3.11 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
 ```
 
-## 🛠️ Technical Details
+Provide secrets via `.streamlit/secrets.toml` (gitignored) **or** environment variables:
 
-### Dependencies
-- **Streamlit**: Web application framework
-- **Pandas**: Data manipulation and analysis
-- **NumPy**: Numerical computing
-- **OpenAI**: AI model integration
-- **OpenPyXL**: Excel file handling
+```toml
+# .streamlit/secrets.toml
+ANTHROPIC_API_KEY = "sk-ant-..."
+APP_ACCESS_PASSWORD = "choose-a-shared-password"   # optional; omit to skip the gate in local dev
+```
 
-### Architecture
-- **Frontend**: Streamlit web interface
-- **Backend**: Python with OpenAI API integration
-- **Data Processing**: Pandas for data cleaning and validation
-- **AI Engine**: OpenAI GPT-4o-mini for intelligent matching
+Then:
 
-## 🔒 Security & Privacy
+```bash
+streamlit run app.py
+```
 
-- API keys are handled securely and not stored
-- Data processing happens locally
-- No data is permanently stored on external servers
-- All uploaded files remain in your local environment
+## Deploying (Streamlit Community Cloud)
 
-## 🐛 Troubleshooting
+The app is built to deploy on [Streamlit Community Cloud](https://streamlit.io/cloud), same as the sibling Peer Mentoring tool:
 
-### Common Issues
+1. Point a new app at this repo / `main` / `app.py`.
+2. In the app's **Settings → Secrets**, add `ANTHROPIC_API_KEY` and `APP_ACCESS_PASSWORD` (same keys as `secrets.toml`).
+3. Deploy. The committed `.streamlit/config.toml` applies the IMFAHE theme and keeps XSRF protection on.
 
-1. **Missing Required Columns**
-   - Ensure your Excel files contain all required columns
-   - Check column names match exactly (case-sensitive)
+The `.devcontainer/` setup is for local/Codespaces development only (it disables XSRF for the Codespaces preview proxy); it is not used by the Cloud deployment.
 
-2. **API Key Issues**
-   - Verify your OpenAI API key is valid and has sufficient credits
-   - Ensure you have access to GPT-4o-mini model
+## Configuration
 
-3. **File Upload Errors**
-   - Check that files are in Excel (.xlsx) format
-   - Ensure files are not corrupted or password-protected
+| Setting | Where | Default | Notes |
+|---|---|---|---|
+| `ANTHROPIC_API_KEY` | secrets / env | — | Required. The only LLM credential. |
+| `APP_ACCESS_PASSWORD` | secrets / env | unset | Shared password gate; if unset, the app is open (dev). |
+| `DEBUG_MODE` | env | `FALSE` | Set `TRUE` to expose token/cost internals and extra diagnostics. **Off in production.** |
+| Model | Configure step | `claude-opus-5-5` | Matrix scoring + reasoning. |
+| Max mentees / mentor | Configure step | 2 | 1–3. |
+| Spain ↔ Spain restriction | Configure step | On | Spanish mentors aren't matched to Spanish mentees. |
 
-4. **Memory Issues with Large Files**
-   - Consider splitting large datasets into smaller files
-   - The system works best with datasets under 1000 records
+## Development
 
-## 📈 Performance Tips
+```bash
+pip install -r requirements-dev.txt
+ruff check .          # lint
+python -m pytest -q   # tests
+```
 
-- **Training Data**: Include relevant historical data to improve matching accuracy
-- **Data Quality**: Clean and consistent data produces better matches
-- **Prompt Tuning**: Experiment with different prompts for your specific use case
-- **Batch Processing**: Process mentees in smaller batches for large datasets
+CI (`.github/workflows/ci.yml`) runs ruff + pytest on every push/PR; Dependabot keeps pip + GitHub Actions deps current. The matching logic is decoupled from Streamlit in `matching_core.py` so it is unit-tested headlessly.
 
-## 🤝 Contributing
+## Security & privacy
 
-We welcome contributions! Please feel free to:
-- Report bugs and issues
-- Suggest new features
-- Submit pull requests
-- Improve documentation
+- Secrets come from Streamlit secrets / environment variables and are never committed (`.streamlit/secrets.toml` is gitignored).
+- Applicant files stay in the running environment; nothing is persisted to external storage beyond the Anthropic API calls needed to score matches.
+- A shared-password gate (`APP_ACCESS_PASSWORD`) protects the deployed app.
 
-## 📄 License
+## Troubleshooting
 
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## 🆘 Support
-
-For support and questions:
-- Create an issue in the repository
-- Check the troubleshooting section above
-- Review the sample data format for reference
+- **"Prerequisites not met" on Generate** — set the API key (Configure step) and upload both files first; use "← Back to Generate" to return.
+- **Missing required columns** — the file is missing a core column (see Data requirements); the normalization pass reports which.
+- **A batch failed / incomplete matrix** — usually a transient API issue; re-run. Truncation is surfaced as an honest error, never silently filled.
 
 ---
 
-**Built with ❤️ for better mentorship matching**
+**Built for IMFAHE's International Mentor Program.**
