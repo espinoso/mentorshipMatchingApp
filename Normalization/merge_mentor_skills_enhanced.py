@@ -59,7 +59,7 @@ MENTOR_COLUMNS = {
 # PRE column mapping (what to look for in PRE files)
 PRE_COLUMN_MAPPING = {
     'affiliation': ['affiliation'],
-    'country': ['country of your affiliated institution'],
+    'country': ['affiliated institution', 'affiliated university'],
     'current_position': ['current position'],
     'institution_type': ['type of institution', 'institution type'],
     'country_of_origin': ['country of origin'],

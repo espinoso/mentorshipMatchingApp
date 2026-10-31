@@ -58,8 +58,8 @@ MENTEE_COLUMNS = {
 
 # PRE column mapping (what to look for in PRE files)
 PRE_COLUMN_MAPPING = {
-    'affiliation': ['university where you are currently studying'],
-    'country': ['country of your affiliated university'],
+    'affiliation': ['university where you are currently studying', 'affiliation'],
+    'country': ['affiliated university', 'affiliated institution'],
     'education_level': ['highest educational level', 'highest education level'],
     'current_program': ['current education program'],
     'field': ['field of expertise'],
