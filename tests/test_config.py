@@ -40,10 +40,12 @@ def test_opus_pricing_values_and_unknown_model_prices_as_default():
     assert estimate_api_cost(1_000_000, 0, "not-a-model") == pytest.approx(4.0)
 
 
-def test_model_choice_drives_matrix_and_reasoning_model(monkeypatch):
+def test_model_is_fixed_in_code(monkeypatch):
+    # No user-facing selector anymore: _model_choice always returns the code default,
+    # ignoring any stray model_choice left in session_state.
     monkeypatch.setitem(app.st.session_state, "model_choice", "claude-sonnet-5-5")
-    assert app._model_choice(app.MATRIX_MODEL) == "claude-sonnet-5-5"
-    assert app._model_choice(app.REASONING_MODEL) == "claude-sonnet-5-5"
+    assert app._model_choice(app.MATRIX_MODEL) == app.MATRIX_MODEL
+    assert app._model_choice(app.REASONING_MODEL) == app.REASONING_MODEL
 
 
 def test_anthropic_key_reads_env(monkeypatch):

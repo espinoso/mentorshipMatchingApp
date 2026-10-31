@@ -5,6 +5,7 @@ Includes caching, validation, reporting, and file I/O helpers.
 
 import hashlib
 import os
+import re
 import sys
 from datetime import datetime
 from typing import Any
@@ -21,6 +22,95 @@ NORMALIZATION_MODEL = "claude-haiku-5-5"
 def setup_claude() -> ClaudeClient:
     """Claude Haiku client for the normalization scripts; key from ANTHROPIC_API_KEY."""
     return ClaudeClient(NORMALIZATION_MODEL, os.getenv("ANTHROPIC_API_KEY", ""))
+
+
+# ============================================================================
+# DETERMINISTIC NORMALIZATION (no LLM)
+# ============================================================================
+
+# Checked in order, first hit wins (highest level first, so "Bachelors and Masters" -> Masters).
+# "posgrad" is listed so Spanish "posgrado" is caught as Masters before "grado" reads it as Bachelors.
+_LEVEL_KEYWORDS = (
+    ("PhD", ("phd", "ph.d", "d.phil", "dphil", "doctor")),
+    ("Masters", ("master", "máster", "m.sc", "msc", "mba", "maestr", "postgrad", "posgrad", "mphil")),
+    ("Bachelors", ("bachelor", "b.sc", "bsc", "licenc", "grado", "undergrad", "pregrado")),
+    ("High School", ("high school", "secondary", "bachillerato", "preparatoria", "secundaria")),
+)
+
+
+def classify_education_level(text) -> str:
+    """Map free text (EN/ES) to PhD, Masters, Bachelors, High School, or N/A by keyword."""
+    if pd.isna(text):
+        return "N/A"
+    lowered = str(text).lower()
+    for level, keywords in _LEVEL_KEYWORDS:
+        if any(k in lowered for k in keywords):
+            return level
+    return "N/A"
+
+
+def _is_blank(text) -> bool:
+    return pd.isna(text) or str(text).strip().lower() in ("", "n/a", "nan", "none")
+
+
+def classify_level_llm(text, client, cache) -> str:
+    """LLM fallback for education-level classification (Haiku), used only when the deterministic
+    keyword + pattern layers can't place a present-but-unusual value. Blank in → N/A with no call.
+    Cached, and fails safe to N/A."""
+    if _is_blank(text):
+        return "N/A"
+    key = cache.get_cache_key(f"level|{text}")
+    cached = cache.get(key)
+    if cached is not None:
+        return cached
+    valid = {"Masters", "PhD", "High School", "Bachelors", "N/A"}
+    try:
+        result = client.complete_text(
+            "You return only one of these exact words: Masters, PhD, High School, Bachelors, N/A. Nothing else.",
+            f'Map this education description to exactly one of Masters, PhD, High School, Bachelors '
+            f'(or N/A if it is genuinely none of these): "{str(text).strip()}"',
+            max_tokens=10,
+        ).strip()
+        result = result if result in valid else "N/A"
+    except Exception:
+        result = "N/A"
+    cache.set(key, result)
+    return result
+
+
+def extract_program_specialization(program) -> str:
+    """Cheap field-of-study extraction: 'PhD in Computer Science' -> 'Computer Science'.
+
+    shortcut: only '<level> in/en/of/de X' and level-free text are handled; 'Master Data Science'
+    (no preposition) yields '' -- upgrade if that pattern turns out to be common.
+    """
+    if pd.isna(program):
+        return ""
+    text = str(program).strip()
+    m = re.search(r"\b(?:in|en|of|de|del)\b\s+(.+)", text, re.IGNORECASE)
+    if m and classify_education_level(text[:m.start()]) != "N/A":
+        return m.group(1).strip()
+    return text if classify_education_level(text) == "N/A" else ""
+
+
+_FILLER_LABEL = re.compile(r"^(interests?|skills?|specialization|areas?|expertise|fields?)\s*:\s*", re.IGNORECASE)
+
+
+def merge_skill_sources(*sources) -> str:
+    """Merge skill/field sources into a deduped keyword list. Splits on commas, semicolons,
+    slashes, pipes, bullets, newlines and sentence periods; strips filler label prefixes
+    ('interests:'); drops empties, 'n/a', 'error' terms and pure-number fragments; lowercases
+    and dedupes in first-seen order."""
+    seen: dict[str, None] = {}
+    for source in sources:
+        if source is None or pd.isna(source):
+            continue
+        cleaned = re.sub(r"\bn/a\b", "", str(source), flags=re.IGNORECASE)
+        for part in re.split(r"[,;/|•\n]|\.\s+", cleaned):
+            term = _FILLER_LABEL.sub("", part.strip().lower()).strip(" .")
+            if term and "error" not in term and not term.isdigit():
+                seen.setdefault(term)
+    return ", ".join(seen) or "N/A"
 
 
 # ============================================================================

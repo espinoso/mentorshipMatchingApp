@@ -154,7 +154,7 @@ def validate_pre_format_columns(df: pd.DataFrame, file_type: str) -> tuple[bool,
             'affiliation': ['affiliation'],
             'country': ['country of your affiliated institution'],
             'current_position': ['current position'],
-            'institution_type': ['type of work'],
+            'institution_type': ['type of institution', 'institution type'],
             'country_of_origin': ['country of origin'],
             'education_level': ['highest educational level', 'highest education level'],
             'alma_mater': ['institution & country where bachelor', 'bachelor\'s degree'],
@@ -165,7 +165,7 @@ def validate_pre_format_columns(df: pd.DataFrame, file_type: str) -> tuple[bool,
             'career_dev_experience': ['areas where you feel comfortable mentoring', 'comfortable mentoring']
         }
         # Critical columns for mentors (must be present)
-        critical_columns = ['education_level', 'field', 'specialization', 'hard_skills', 'institution_type']
+        critical_columns = ['education_level', 'field', 'specialization', 'hard_skills']  # institution_type is optional (not in every survey)
     
     # Use find_column_flexible to check for columns (same logic as normalization scripts)
     missing_columns = []
@@ -238,25 +238,15 @@ def create_streamlit_progress_handler(progress_placeholder, status_placeholder, 
             if session_state_key in st.session_state:
                 st.session_state[session_state_key] = progress_state.copy()
         
-        # Update status placeholder with latest message
-        if status_placeholder and messages:
-            # Show a cleaner status (extract step name if possible)
-            status_display = messages[-1]
-            # Clean up status display
-            if status_display.startswith('['):
-                # It's a progress indicator, show it as-is
-                status_placeholder.text(f"Status: {status_display}")
-            else:
-                status_placeholder.text(f"Status: {status_display[:100]}...")
-        
-        # Update progress placeholder with recent messages
+        # Render a calm progress bar instead of a terminal log. The full messages stay in
+        # progress_state (and session_state) for the collapsed Details view after completion.
+        total = progress_state.get('total_rows', 0)
+        done = progress_state.get('processed_rows', 0)
+        if status_placeholder:
+            status_placeholder.caption(f"Normalizing row {done} of {total}…" if total else "Preparing…")
         if progress_placeholder:
-            # Show last 30 messages for better visibility
-            recent_messages = messages[-30:] if len(messages) > 30 else messages
-            with progress_placeholder.container():
-                # Show as code block for terminal-like appearance
-                log_text = '\n'.join(recent_messages)
-                st.code(log_text, language=None)
+            frac = (done / total) if total else 0.0
+            progress_placeholder.progress(min(max(frac, 0.0), 1.0))
     
     return progress_handler, messages, progress_state
 
