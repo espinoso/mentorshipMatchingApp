@@ -132,6 +132,35 @@ def test_driver_marks_batch_error_on_cutoff(monkeypatch):
     assert "complete" not in statuses
 
 
+def test_driver_assembles_all_batches_in_parallel(monkeypatch):
+    """generate_matrix_in_batches scores batches concurrently and assembles the full matrix,
+    regardless of the order futures complete."""
+    fake_st = MagicMock()
+    # make st.session_state.get honor its default (country_restrictions -> ["spain"])
+    fake_st.session_state.get = lambda key, default=None: default
+    monkeypatch.setattr(app, "st", fake_st)
+
+    import progress_ui
+    for fn in ("initialize_progress_tracking", "update_batch_progress",
+               "render_batch_card", "render_progress_overview"):
+        monkeypatch.setattr(progress_ui, fn, MagicMock())
+
+    def fake_score(mentees_df, mentor_batch_df, api_key=None, model=None):
+        rows = [{"mentor_id": str(m), "scores": [{"mentee_id": "E1", "percentage": 70}]}
+                for m in mentor_batch_df["Mentor ID"]]
+        return json.dumps({"matrix": rows})
+
+    monkeypatch.setattr(app, "_score_mentor_batch", fake_score)
+
+    matrix = app.generate_matrix_in_batches(_mentees(["E1"]),
+                                            _mentors(["M1", "M2", "M3", "M4", "M5"]),
+                                            batch_size=2)  # 3 batches, scored in parallel
+
+    assert matrix is not None
+    assert sorted(matrix.index) == ["M1", "M2", "M3", "M4", "M5"]  # every batch landed
+    assert (matrix["E1"] == 70).all()
+
+
 def test_batch_size_output_never_exceeds_cap():
     """calculate_optimal_batch_size never returns a batch whose estimated output exceeds the cap."""
     for num_mentees in (1, 10, 62, 200, 500, 2000):

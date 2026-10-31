@@ -1,10 +1,17 @@
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import pandas as pd
 import streamlit as st
 
-from info import DEFAULT_MODEL, MENTEE_COLUMNS, MENTOR_COLUMNS
+from info import (
+    DEFAULT_MODEL,
+    MATRIX_BATCH_SIZE,
+    MATRIX_MAX_WORKERS,
+    MENTEE_COLUMNS,
+    MENTOR_COLUMNS,
+)
 from llm_client import ClaudeClient, LLMError, parse_json
 from matching import apply_country_restrictions, parse_matrix_response
 from prompts import create_default_prompt, get_prompt_for_api
@@ -150,13 +157,16 @@ def _anthropic_key() -> str:
         return ""
 
 
-def _score_mentor_batch(mentees_df, mentor_batch_df) -> str:
+def _score_mentor_batch(mentees_df, mentor_batch_df, api_key=None, model=None) -> str:
     """Score one mentor batch against all mentees with Claude; return the raw JSON text.
 
     The system prompt (scoring rubric + every mentee) is byte-identical across batches, so
     prompt caching hits; only the user prompt (this batch's mentors) varies. max_tokens is
     budgeted from the expected output so the JSON isn't truncated. Raises LLMError when the
     response is cut off, so the caller marks the batch an error instead of filling 30s.
+
+    api_key/model are resolved by the caller when this runs on a worker thread (st.secrets and
+    st.session_state aren't thread-safe); they default to the normal lookups for direct callers.
     """
     system = f"{get_prompt_for_api()}\n\n{prepare_data_for_assistant(mentees_df, None)}"
     user = (
@@ -165,7 +175,7 @@ def _score_mentor_batch(mentees_df, mentor_batch_df) -> str:
     )
     budget = int(estimate_output_tokens(len(mentor_batch_df), len(mentees_df)) * 1.5) + THINKING_HEADROOM
     budget = max(THINKING_HEADROOM, min(budget, MATRIX_MAX_OUTPUT_TOKENS))
-    client = ClaudeClient(_model_choice(MATRIX_MODEL), _anthropic_key())
+    client = ClaudeClient(model or _model_choice(MATRIX_MODEL), api_key or _anthropic_key())
     return client.complete_json(system, user, max_tokens=budget, cache_system=True)
 
 
@@ -187,23 +197,14 @@ def generate_matrix_in_batches(mentees_df, mentors_df, batch_size=None):
         render_progress_overview,
         update_batch_progress,
     )
-    from utils import calculate_optimal_batch_size
 
     all_mentor_ids = mentors_df[MENTOR_COLUMNS['id']].tolist()
     all_mentee_ids = mentees_df[MENTEE_COLUMNS['id']].tolist()
     total_mentors = len(all_mentor_ids)
     total_mentees = len(all_mentee_ids)
 
-    # Auto-calculate batch size if not provided
     if batch_size is None:
-        batch_size = calculate_optimal_batch_size(total_mentors, total_mentees)
-        if is_debug_mode():
-            total_batches = int((total_mentors + batch_size - 1) / batch_size) if batch_size else 0
-            st.info(f"📊 **Auto-calculated batch size**: {batch_size} mentors per batch")
-            st.caption(
-                f"Sized by estimated output tokens (cap under Claude's 128K). "
-                f"Total batches: {total_batches}"
-            )
+        batch_size = MATRIX_BATCH_SIZE
 
     mentor_batches = [all_mentor_ids[i:i + batch_size] for i in range(0, len(all_mentor_ids), batch_size)]
     total_batches = len(mentor_batches)
@@ -224,100 +225,67 @@ def generate_matrix_in_batches(mentees_df, mentors_df, batch_size=None):
     # Create a container for completed batch cards (they accumulate)
     completed_batches_container = st.container()
 
-    # Create empty placeholder for currently processing batch
-    current_batch_placeholder = st.empty()
+    combined_matrix_dict = {}
 
-    # Render initial progress overview
+    # Resolve the key and model once, on the main thread: st.secrets / st.session_state are not
+    # thread-safe, so the worker threads below must never touch them.
+    api_key = _anthropic_key()
+    model = _model_choice(MATRIX_MODEL)
+
+    def _fetch(item):
+        """Worker thread: Claude call + pure parse only — NO st.* (Streamlit isn't thread-safe)."""
+        batch_num, mentor_batch = item
+        mentor_batch_df = mentors_df[mentors_df[MENTOR_COLUMNS['id']].isin(mentor_batch)]
+        started = time.time()
+        try:
+            response = _score_mentor_batch(mentees_df, mentor_batch_df, api_key, model)
+        except LLMError as e:
+            # A cut-off or failed batch: report it. Do NOT fall through to a 30-fill.
+            return batch_num, mentor_batch, None, str(e), time.time() - started
+        report = parse_matrix_response(response, mentor_batch, all_mentee_ids)
+        return batch_num, mentor_batch, report, None, time.time() - started
+
+    # Every batch is in flight at once — reflect that before any result lands.
+    for batch_num in range(1, total_batches + 1):
+        update_batch_progress(batch_num, 'processing')
     with progress_placeholder.container():
         render_progress_overview()
 
-    combined_matrix_dict = {}
+    # Score the batches concurrently; render + merge each result on the main thread as it lands.
+    with ThreadPoolExecutor(max_workers=min(MATRIX_MAX_WORKERS, total_batches)) as pool:
+        futures = [pool.submit(_fetch, (bn, mb)) for bn, mb in enumerate(mentor_batches, 1)]
+        for future in as_completed(futures):
+            batch_num, mentor_batch, batch_report, err, batch_time = future.result()
 
-    for batch_num, mentor_batch in enumerate(mentor_batches, 1):
-        batch_start_time = time.time()
+            if err is not None:
+                update_batch_progress(batch_num, 'error', {'error': err})
+                st.error(f"❌ Batch {batch_num} failed: {err}")
+                continue
 
-        # Update progress: mark as processing
-        update_batch_progress(batch_num, 'processing')
+            # _render_parse_report emits the validation messages, so it must run here (main thread).
+            batch_matrix_df = _render_parse_report(batch_report, mentor_batch, all_mentee_ids)
+            if batch_matrix_df is None:
+                update_batch_progress(batch_num, 'error', {'error': 'Failed to parse response'})
+                st.error(f"❌ Batch {batch_num} failed to parse")
+                continue
 
-        # Update progress overview in placeholder (replaces previous content)
-        with progress_placeholder.container():
-            render_progress_overview()
+            # Mentor ids partition the batches, so no mentor can appear twice.
+            for mentor_id in batch_matrix_df.index:
+                combined_matrix_dict[mentor_id] = batch_matrix_df.loc[mentor_id].to_dict()
 
-        # Show current batch status in placeholder (replaces previous)
-        with current_batch_placeholder.container():
-            render_batch_card(batch_num, 'processing', is_current=True)
-
-        # Batch status is shown in progress UI, suppress these messages
-        # Only show detailed info in debug mode
-        if is_debug_mode():
-            st.caption(f"🔄 Batch {batch_num}: {len(mentor_batch)} mentors ({mentor_batch[0]} to {mentor_batch[-1]})")
-
-        mentor_batch_df = mentors_df[mentors_df[MENTOR_COLUMNS['id']].isin(mentor_batch)]
-
-        try:
-            response = _score_mentor_batch(mentees_df, mentor_batch_df)
-        except LLMError as e:
-            # A cut-off or failed batch: mark it an error. Do NOT fall through to a 30-fill.
-            update_batch_progress(batch_num, 'error', {'error': str(e)})
-            st.error(f"❌ Batch {batch_num} failed: {e!s}")
-            continue
-
-        batch_time = time.time() - batch_start_time
-
-        batch_report = parse_matrix_response(response, mentor_batch, all_mentee_ids)
-        batch_matrix_df = _render_parse_report(batch_report, mentor_batch, all_mentee_ids)
-
-        if batch_matrix_df is None:
-            update_batch_progress(batch_num, 'error', {'error': 'Failed to parse response'})
-            st.error(f"❌ Batch {batch_num} failed to parse")
-            continue
-
-        received_mentors = list(batch_matrix_df.index)
-        expected_mentors_set = {str(m) for m in mentor_batch}
-        received_mentors_set = set(received_mentors)
-
-        overwrites = []
-
-        for mentor_id in batch_matrix_df.index:
-            if mentor_id in combined_matrix_dict:
-                overwrites.append(mentor_id)
-                if is_debug_mode():
-                    st.caption(f"⚠️ DUPLICATE: '{mentor_id}' already exists!")
-
-            combined_matrix_dict[mentor_id] = batch_matrix_df.loc[mentor_id].to_dict()
-
-        # Prepare batch details (token/cost telemetry dropped)
-        batch_details = {
-            'mentors': len(batch_matrix_df),
-            'mentees': len(all_mentee_ids),
-            'scores': len(batch_matrix_df) * len(all_mentee_ids),
-            'time': batch_time,
-            'tokens': None,
-            'cost': None,
-        }
-
-        # Update progress: mark as complete
-        update_batch_progress(batch_num, 'complete', batch_details)
-
-        # Update progress overview in placeholder (replaces previous content)
-        with progress_placeholder.container():
-            render_progress_overview()
-
-        # Clear current batch placeholder and move completed batch to container
-        current_batch_placeholder.empty()
-
-        # Render completed batch card in the completed batches container
-        with completed_batches_container:
-            render_batch_card(batch_num, 'complete', batch_details)
-
-        if is_debug_mode():
-            if overwrites:
-                st.caption(f"⚠️ {len(overwrites)} duplicate(s) detected")
-            if received_mentors_set == expected_mentors_set:
-                st.caption(f"✅ Batch {batch_num}: Received all {len(batch_matrix_df)}/{len(mentor_batch)} mentors")
-            else:
-                missing_in_batch = expected_mentors_set - received_mentors_set
-                st.caption(f"⚠️ Batch {batch_num}: Missing {len(missing_in_batch)} mentor(s)")
+            batch_details = {
+                'mentors': len(batch_matrix_df),
+                'mentees': len(all_mentee_ids),
+                'scores': len(batch_matrix_df) * len(all_mentee_ids),
+                'time': batch_time,
+                'tokens': None,
+                'cost': None,
+            }
+            update_batch_progress(batch_num, 'complete', batch_details)
+            with progress_placeholder.container():
+                render_progress_overview()
+            with completed_batches_container:
+                render_batch_card(batch_num, 'complete', batch_details)
 
     if not combined_matrix_dict:
         st.error("❌ No batches succeeded")
@@ -772,7 +740,7 @@ def main():
     if 'selected_preset' not in st.session_state:
         st.session_state.selected_preset = "Balanced ⭐"
     if 'batch_size' not in st.session_state:
-        st.session_state.batch_size = 15
+        st.session_state.batch_size = MATRIX_BATCH_SIZE
     if 'max_mentees_per_mentor' not in st.session_state:
         st.session_state.max_mentees_per_mentor = 2
     if 'country_restrictions' not in st.session_state:

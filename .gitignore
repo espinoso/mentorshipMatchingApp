@@ -163,6 +163,7 @@ files/
 # Local test data with real mentor/mentee info — never commit
 samples/
 supporting_docs/
+benchmark/.cache/
 
 # Logs
 *.log

@@ -5,7 +5,7 @@ Shows a summary of all settings and data before generating matches
 
 import streamlit as st
 
-from info import DEFAULT_MODEL
+from info import DEFAULT_MODEL, MATRIX_BATCH_SIZE
 
 
 def render_matches_tab():
@@ -44,15 +44,13 @@ def render_matches_tab():
         total_evaluations = mentee_count * mentor_count
         
         # Calculate optimal batch size if we have all data
-        batch_size = st.session_state.get('batch_size', 15)
+        batch_size = st.session_state.get('batch_size', MATRIX_BATCH_SIZE)
         batch_info = None
         est_cost = None
         if mentees_df is not None and mentors_df is not None and st.session_state.get('api_key'):
-            from utils import calculate_optimal_batch_size, estimate_api_cost, estimate_batch_tokens
-            batch_size = calculate_optimal_batch_size(
-                total_mentors=mentor_count,
-                num_mentees=mentee_count,
-            )
+            from utils import estimate_api_cost, estimate_batch_tokens
+            # Small batches scored concurrently by the engine (see info.MATRIX_BATCH_SIZE).
+            batch_size = MATRIX_BATCH_SIZE
             st.session_state.batch_size = batch_size
             
             # Calculate batch details for display
@@ -75,7 +73,7 @@ def render_matches_tab():
         st.markdown(f"""
         <div class="info-card">
             <strong>Ready to generate matches!</strong><br>
-            This will process {total_evaluations:,} compatibility evaluations using {batch_size} mentors per batch (auto-optimized).
+            This will process {total_evaluations:,} compatibility evaluations in batches of {batch_size} mentors, scored in parallel.
         </div>
         """, unsafe_allow_html=True)
         
