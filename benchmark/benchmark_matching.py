@@ -23,7 +23,7 @@ import os
 import statistics
 import sys
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 
 import pandas as pd
 
@@ -41,9 +41,10 @@ if not os.environ.get("ANTHROPIC_API_KEY"):
                     os.environ["ANTHROPIC_API_KEY"] = line.split("=", 1)[1].strip().strip('"').strip("'")
                     break
 
-import app  # noqa: E402
-import matching_core  # noqa: E402
-from info import DEFAULT_MODEL, MATRIX_BATCH_SIZE, MATRIX_MAX_WORKERS, MENTEE_COLUMNS, MENTOR_COLUMNS  # noqa: E402
+import app
+import matching_core
+from info import DEFAULT_MODEL, MATRIX_BATCH_SIZE, MATRIX_MAX_WORKERS, MENTEE_COLUMNS, MENTOR_COLUMNS
+from llm_client import LLMError
 
 SAMP = os.path.join(REPO, "samples")
 MODEL = os.environ.get("BENCH_MODEL", DEFAULT_MODEL)
@@ -102,7 +103,7 @@ def score_matrix(ee, mo):
                 rep = matching_core.parse_matrix_response(app._score_mentor_batch(ee, bdf), bids, mentee_ids)
                 if rep.df is not None:
                     return rep.df
-            except Exception:
+            except LLMError:  # cutoff / transient API failure — retry
                 time.sleep(1)
         return None
 
@@ -140,20 +141,20 @@ def main():
     ee_f = {str(r[EID]): str(r[EF]).strip() for _, r in ee.iterrows()}
     mo_f = {str(r[MID]): str(r[MF]).strip() for _, r in mo.iterrows()}
 
-    def og(mentor, mentee):
+    def og(mentor, mentee):  # original matrix score (NaN if the pair isn't in it)
         try: return float(om.loc[str(mentor), str(mentee)])
-        except Exception: return float('nan')
-    def ug(mentor, mentee):
+        except (KeyError, ValueError): return float('nan')
+    def ug(mentor, mentee):  # our matrix score
         try: return float(our.loc[str(mentor), str(mentee)])
-        except Exception: return float('nan')
+        except (KeyError, ValueError): return float('nan')
 
     mentees = [m for m in orig_assign if m in our_assign]
     print(f"\ncomparable mentees: {len(mentees)}", flush=True)
 
-    so = [v for v in (og(orig_assign[m], m) for m in mentees) if v == v]
-    sn = [v for v in (og(our_assign[m], m) for m in mentees) if v == v]
-    to = [v for v in (ug(orig_assign[m], m) for m in mentees) if v == v]
-    tn = [v for v in (ug(our_assign[m], m) for m in mentees) if v == v]
+    so = [v for v in (og(orig_assign[m], m) for m in mentees) if pd.notna(v)]
+    sn = [v for v in (og(our_assign[m], m) for m in mentees) if pd.notna(v)]
+    to = [v for v in (ug(orig_assign[m], m) for m in mentees) if pd.notna(v)]
+    tn = [v for v in (ug(our_assign[m], m) for m in mentees) if pd.notna(v)]
     print("\n##### HEAD-TO-HEAD (each tool scores its own picks higher; look at the spread) #####", flush=True)
     print(f"By the ORIGINAL's matrix:  original's picks mean={statistics.mean(so):.1f}  |  OUR picks mean={statistics.mean(sn):.1f}", flush=True)
     print(f"By OUR matrix:             original's picks mean={statistics.mean(to):.1f}  |  OUR picks mean={statistics.mean(tn):.1f}", flush=True)
@@ -167,7 +168,7 @@ def main():
 
     ov = om.to_numpy(dtype=float).flatten()
     uv = our.to_numpy(dtype=float).flatten()
-    print(f"\nCALIBRATION (fewer hard caps = finer discrimination):", flush=True)
+    print("\nCALIBRATION (fewer hard caps = finer discrimination):", flush=True)
     print(f"  original matrix:  ==55:{int((ov==55).sum())}  ==0:{int((ov==0).sum())}  of {ov.size}", flush=True)
     print(f"  our matrix:       ==55:{int((uv==55).sum())}  ==0:{int((uv==0).sum())}  of {uv.size}", flush=True)
 

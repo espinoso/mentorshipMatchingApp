@@ -200,8 +200,6 @@ def generate_matrix_in_batches(mentees_df, mentors_df, batch_size=None):
 
     all_mentor_ids = mentors_df[MENTOR_COLUMNS['id']].tolist()
     all_mentee_ids = mentees_df[MENTEE_COLUMNS['id']].tolist()
-    total_mentors = len(all_mentor_ids)
-    total_mentees = len(all_mentee_ids)
 
     if batch_size is None:
         batch_size = MATRIX_BATCH_SIZE
