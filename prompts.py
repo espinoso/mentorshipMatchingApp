@@ -1,24 +1,27 @@
 """Prompt templates for the Mentorship Matching System.
 
-The scoring rubric is intentionally short. Modern Claude judges multidisciplinary
-compatibility better than the old hand-tuned arithmetic + curated field-compatibility matrix
-did (which demonstrably capped good cross-field matches), so the rubric names the dimensions
-and a calibration scale in plain language and lets the model judge. Determinism — the output
-schema, completeness, the truncation guard, and hard rules like the country restriction and the
-mentees-per-mentor cap — lives in code, not here.
+The division of labor, redone for a capable model:
+- CODE owns the plumbing — the output schema, the "score every pair" completeness rule, the
+  truncation guard (in the client), and hard rules like the country restriction and the
+  mentees-per-mentor cap (in the matcher).
+- The RUBRIC below is pure scoring policy — the dimensions and the calibration scale — stated
+  in plain language. It is what a person sees and may edit; modern Claude judges multidisciplinary
+  compatibility better than the old hand-tuned arithmetic + curated field matrix did.
 """
 
 import streamlit as st
 
 from info import JSON_FOOTER
 
-MATRIX_RUBRIC = """Return ONLY the JSON described at the end of this message.
+# Code-owned instruction wrapped around the rubric (not part of the editable rubric itself).
+_SCORING_INSTRUCTION = (
+    "Score the compatibility of EVERY mentee-mentor pair from 0 to 100 using the rubric below. "
+    "Return a score for every pair — never omit one, even obviously weak matches (give those low scores)."
+)
 
-You are scoring mentor-mentee compatibility for IMFAHE's International Mentor Program, a
-multidisciplinary program that pairs mentees with mentors for international career acceleration.
-
-Give every mentee-mentor pair a 0-100 compatibility score. Score EVERY pair, including weak
-ones - never omit a pair.
+# The editable scoring policy: dimensions + calibration only. No JSON/format talk, no plumbing.
+MATRIX_RUBRIC = """You are scoring mentor-mentee compatibility for IMFAHE's International Mentor
+Program, a multidisciplinary program that pairs mentees with mentors for international career acceleration.
 
 Judge compatibility on these dimensions, in rough order of importance:
 1. Field / discipline alignment - same or closely related academic/professional areas.
@@ -46,25 +49,18 @@ keyword matches, and judge meaning, not shared words."""
 
 
 def create_default_prompt():
-    """The editable scoring rubric (shown in the sidebar's Advanced section)."""
+    """The editable scoring rubric (shown in the sidebar's Advanced section) — policy only."""
     return MATRIX_RUBRIC
 
 
 def get_prompt_for_api(include_json_instructions=True):
-    """Full system rubric sent to the model: the (possibly customized) rubric + the output schema.
-
-    JSON robustness lives in the client (streamed, with a stop_reason guard) and the parser
-    (fence-stripping), so we no longer prepend the old 'RETURN ONLY JSON' coercion block — just
-    the schema footer, which names the exact output structure.
+    """Assemble the full system prompt: the code-owned scoring instruction + the (possibly
+    customized) rubric + the output schema. JSON robustness lives in the client (streamed, with a
+    stop_reason guard) and the parser (fence-stripping), so there is no separate 'RETURN ONLY JSON'
+    coercion block — the schema footer names the exact structure.
     """
     rubric = st.session_state.get("custom_prompt") or MATRIX_RUBRIC
-    if not include_json_instructions:
-        return rubric
-    return rubric + "\n\n" + JSON_FOOTER
-
-
-def create_matrix_prompt(include_json_instructions=True):
-    """The full default matrix prompt (rubric + schema). Kept for callers and tests."""
-    if not include_json_instructions:
-        return MATRIX_RUBRIC
-    return MATRIX_RUBRIC + "\n\n" + JSON_FOOTER
+    prompt = f"{_SCORING_INSTRUCTION}\n\n{rubric}"
+    if include_json_instructions:
+        prompt += "\n\n" + JSON_FOOTER
+    return prompt

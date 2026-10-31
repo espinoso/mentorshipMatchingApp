@@ -15,7 +15,6 @@ from ui_processing import render_processing_tab
 from ui_upload import LOG_CONTAINER_CSS, render_upload_tab
 from utils import (
     estimate_output_tokens,
-    fetch_available_models,
     is_debug_mode,
     show_debug_info,
 )
@@ -127,7 +126,7 @@ def _render_parse_report(report, expected_mentors, expected_mentees):
     return report.df
 
 
-MATRIX_MODEL = DEFAULT_MODEL  # defaults; the UI's st.session_state.model_choice overrides (see _model_choice)
+MATRIX_MODEL = DEFAULT_MODEL  # the model is fixed in code (no user-facing selector)
 REASONING_MODEL = DEFAULT_MODEL
 # Opus's adaptive thinking is spent BEFORE the JSON and counts against max_tokens, so
 # every budget must leave generous room for it on top of the expected output — otherwise
@@ -138,8 +137,8 @@ MATRIX_MAX_OUTPUT_TOKENS = 120000  # headroom under Claude's 128K output cap
 
 
 def _model_choice(default: str) -> str:
-    """The user's selected Claude model (Configure tab), else the given default."""
-    return st.session_state.get("model_choice", default)
+    """The model to use — fixed in code (DEFAULT_MODEL); there is no user-facing selector."""
+    return default
 
 
 def _anthropic_key() -> str:
@@ -677,20 +676,11 @@ def render_sidebar() -> None:
         st.session_state.country_restrictions = ["spain"] if restrict_spain else []
 
         with st.expander("Advanced", expanded=False):
-            models = list(fetch_available_models())
-            if st.session_state.get("model_choice") not in models:
-                st.session_state.model_choice = DEFAULT_MODEL
-            st.session_state.model_choice = st.selectbox(
-                "Claude model",
-                models,
-                index=models.index(st.session_state.model_choice),
-                help="Model used to score compatibility and write the reasoning. The default is recommended.",
-            )
             st.session_state.custom_prompt = st.text_area(
                 "Scoring rubric",
                 value=st.session_state.custom_prompt,
                 height=240,
-                help="The exact scoring instructions sent to the model. The default is tuned — edit only if you know what you're doing.",
+                help="The scoring policy sent to the model (dimensions + calibration). The default is tuned — edit only if you know what you're doing.",
             )
 
 
@@ -790,8 +780,6 @@ def main():
         st.session_state.country_restrictions = ["spain"]
     if 'mentee_search' not in st.session_state:
         st.session_state.mentee_search = ""
-    if 'model_choice' not in st.session_state:
-        st.session_state.model_choice = DEFAULT_MODEL
     if 'reset_counter' not in st.session_state:
         st.session_state.reset_counter = 0
     
