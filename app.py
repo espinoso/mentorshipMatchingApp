@@ -10,9 +10,8 @@ from matching import apply_country_restrictions, parse_matrix_response
 from prompts import create_default_prompt, get_prompt_for_api
 from ui import CSS_STYLES
 from ui_matches import render_matches_tab
-from ui_overview import render_overview_tab
 from ui_processing import render_processing_tab
-from ui_upload import LOG_CONTAINER_CSS, render_upload_tab
+from ui_upload import render_entity_step
 from utils import (
     estimate_output_tokens,
     is_debug_mode,
@@ -28,7 +27,6 @@ st.set_page_config(
 )
 
 st.markdown(CSS_STYLES, unsafe_allow_html=True)
-st.markdown(LOG_CONTAINER_CSS, unsafe_allow_html=True)  # loaded once, not per-step (avoids a spacer gap)
 
 
 def _render_parse_report(report, expected_mentors, expected_mentees):
@@ -613,20 +611,21 @@ def get_reasoning_for_assignments(assignments, mentees_df, mentors_df):
 
 # --------------------------------------------------------------------------- navigation + rail
 
-_STEPS = ["Upload", "Data Overview", "Generate", "Results"]
+_STEPS = ["Mentees", "Mentors", "Generate", "Results"]
 
 
 def _reachable(has_data: bool, has_results: bool) -> set[int]:
-    s = {0}  # Upload is always reachable
+    # Both entity steps are always reachable (upload in any order); `has_data` means BOTH files.
+    s = {0, 1}  # Mentees, Mentors
     if has_data:
-        s |= {1, 2}  # Data Overview, Generate
+        s.add(2)  # Generate
     if has_results:
         s.add(3)  # Results
     return s
 
 
 def _resolve_step(has_data: bool, has_results: bool) -> int:
-    """Stored step clamped into what's reachable (e.g. a new upload clears results)."""
+    """Stored step clamped into what's reachable (e.g. removing a file clears results)."""
     step = st.session_state.get("step", 0)
     if step not in _reachable(has_data, has_results):
         step = 2 if has_data else 0
@@ -817,12 +816,14 @@ def main():
     step = _resolve_step(has_data, has_results)
     render_rail(step, has_data, has_results)
 
-    (
-        render_upload_tab,
-        render_overview_tab,
-        render_matches_tab,
-        render_processing_tab,
-    )[step]()
+    if step == 0:
+        render_entity_step("mentee")
+    elif step == 1:
+        render_entity_step("mentor")
+    elif step == 2:
+        render_matches_tab()
+    else:
+        render_processing_tab()
 
 
 if __name__ == "__main__":
