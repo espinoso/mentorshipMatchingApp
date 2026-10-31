@@ -16,7 +16,6 @@ import streamlit as st
 
 from info import MENTEE_COLUMNS, MENTOR_COLUMNS
 from normalization_utils import (
-    create_download_bytes,
     detect_file_format,
     process_file_with_progress,
     validate_pre_format_columns,
@@ -250,32 +249,6 @@ def _preview(df: pd.DataFrame, file_type: FileType):
     st.dataframe(df if show_all else df.head(5), use_container_width=True, hide_index=True)
 
 
-def _details_expander(file_type: FileType):
-    """Download + normalization stats + raw log, tucked away (not in the organizer's face)."""
-    processed_df = st.session_state.get(get_state_key(file_type, 'processed_df'))
-    info = st.session_state.get(get_state_key(file_type, 'processing_info'))
-    messages = get_progress_messages(file_type)
-    if processed_df is None and not messages:
-        return
-    with st.expander("Details · download, stats, log", expanded=False):
-        if processed_df is not None:
-            st.download_button(
-                "⬇️ Download normalized file",
-                data=create_download_bytes(processed_df),
-                file_name=f"{file_type}s_normalized.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                key=f"download_{file_type}",
-            )
-        if info and 'report' in info:
-            s = info['report'].stats
-            st.caption(
-                f"Rows: {s.get('total_rows', 0)} · normalized {s.get('successful_rows', 0)} · "
-                f"failed {s.get('failed_rows', 0)}"
-            )
-        if messages:
-            st.code('\n'.join(messages[-100:]), language=None)
-
-
 def _failed_rows(file_type: FileType) -> int:
     info = st.session_state.get(get_state_key(file_type, 'processing_info'))
     if info and 'report' in info:
@@ -284,51 +257,51 @@ def _failed_rows(file_type: FileType) -> int:
 
 
 def render_entity_step(file_type: FileType):
-    """The per-entity step: upload -> check -> (normalize) -> ready + preview."""
+    """The per-entity step: upload -> check -> (normalize) -> ready + preview.
+
+    Completed data is read from the stored dataframe (`df_key`), which survives navigation —
+    the file_uploader widget is unmounted when you switch steps, so we never key "is there data"
+    off it. Removing/replacing a file is an explicit button, not an inferred empty uploader.
+    """
     init_session_state()
     config = FILE_TYPE_CONFIG[file_type]
     name = config['title'].replace(' File', '')  # "Mentees" / "Mentors"
     st.subheader(f"{config['icon']} {name}")
 
-    is_processing = st.session_state.get(get_state_key(file_type, 'processing'), False)
-
-    uploaded = st.file_uploader(
-        f"Upload the {file_type}s Excel file",
-        type=['xlsx'],
-        key=f"{file_type}_upload_{st.session_state.reset_counter}",
-        help=f"Must include a '{config['columns']['id']}' column. A raw survey export or an already-normalized file both work.",
-        disabled=is_processing,
-    )
-
     # Mid-normalization: show a progress bar and run the engine (it reruns on completion).
-    if is_processing:
+    if st.session_state.get(get_state_key(file_type, 'processing'), False):
         st.markdown(f"**Normalizing {name.lower()}…** This can take a minute; please keep the tab open.")
         run_file_processing(file_type)
         return
 
-    # No file: if we had state, the user removed it → start from scratch.
-    if uploaded is None:
-        had_state = any(
-            st.session_state.get(get_state_key(file_type, s)) is not None
-            for s in ('processed_df', 'original_df')
-        ) or st.session_state.get(config['df_key']) is not None
-        if had_state:
+    # Already have usable data for this entity → show it. Persists across step navigation.
+    ready_df = st.session_state.get(config['df_key'])
+    if ready_df is not None:
+        failed = _failed_rows(file_type)
+        if failed:
+            st.warning(f"⚠️ {failed} row(s) had issues during normalization.")
+        st.success(f"✓ {len(ready_df)} {file_type}s ready.")
+        _preview(ready_df, file_type)
+        if st.button("Replace file", key=f"replace_{file_type}"):
             _reset_entity(file_type)
+            nonce_key = get_state_key(file_type, 'upload_nonce')
+            st.session_state[nonce_key] = st.session_state.get(nonce_key, 0) + 1
+            st.rerun()
+        return
+
+    # No data yet → show the uploader.
+    nonce = st.session_state.get(get_state_key(file_type, 'upload_nonce'), 0)
+    uploaded = st.file_uploader(
+        f"Upload the {file_type}s Excel file",
+        type=['xlsx'],
+        key=f"{file_type}_upload_{nonce}",
+        help=f"Must include a '{config['columns']['id']}' column. A raw survey export or an already-normalized file both work.",
+    )
+    if uploaded is None:
         st.info(f"Upload the {file_type}s file to begin. It will be checked and, if needed, normalized.")
         return
 
-    # Already normalized this session → ready + preview.
-    processed_df = st.session_state.get(get_state_key(file_type, 'processed_df'))
-    if processed_df is not None:
-        failed = _failed_rows(file_type)
-        if failed:
-            st.warning(f"⚠️ {failed} row(s) had issues during normalization — see Details below.")
-        st.success(f"✓ {len(processed_df)} {file_type}s ready.")
-        _preview(processed_df, file_type)
-        _details_expander(file_type)
-        return
-
-    # A fresh file is present: read, detect format, validate the schema.
+    # A file is present: read, detect format, validate the schema.
     try:
         df = clean_dataframe(pd.read_excel(uploaded))
     except Exception as e:
@@ -348,12 +321,10 @@ def render_entity_step(file_type: FileType):
         st.caption("Upload a file with the required columns — a raw survey export or an already-normalized file.")
         return
 
-    # Valid. Already-normalized (POST) files are ready immediately.
+    # Valid. Already-normalized (POST) files are ready immediately (df_key set -> ready view).
     if file_format == 'POST':
         _store_df(config['df_key'], df)
-        st.success(f"✓ {len(df)} {file_type}s ready (already normalized).")
-        _preview(df, file_type)
-        return
+        st.rerun()
 
     # Raw (PRE) file: offer normalization.
     st.success(f"✓ File looks valid — {len(df)} rows. It needs normalizing before matching.")
