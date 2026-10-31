@@ -82,7 +82,7 @@ def test_mentee_field_single_call_shape_and_budget():
     c = FakeClaude('"Computer Science".')
     assert mentee.classify_mentee_field("cs", "PhD ML", c, AICache(), 1) == "Computer Science"
     assert len(c.calls) == 1
-    assert c.calls[0][2] == 20
+    assert c.calls[0][2] == 50
     assert "PhD ML" in c.calls[0][1]  # program is given as context
 
 
@@ -98,7 +98,7 @@ def test_mentor_field_classification():
         "zzqq quasar widgets", client=c, cache=AICache(), row_num=1
     )
     assert cat == "Quantum Optics"
-    assert c.calls[0][2] == 20
+    assert c.calls[0][2] == 50
     assert "quasar" in terms
 
 

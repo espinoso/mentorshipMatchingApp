@@ -112,7 +112,7 @@ Return only the broad field category:"""
             result = client.complete_text(
                 "You only return a single broad academic/professional field category. Maximum 3 words. Proper capitalization.",
                 prompt,
-                max_tokens=20,
+                max_tokens=50,  # a few words of field label + headroom so it isn't cut off
             ).strip('."\' \n')
             if not result:
                 raise ValueError("empty response")

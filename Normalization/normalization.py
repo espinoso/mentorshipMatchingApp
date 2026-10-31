@@ -1516,7 +1516,7 @@ Return only the broad field category:"""
                         broad_category = client.complete_text(
                             "You only return a single broad academic/professional field category. Maximum 3 words. Proper capitalization.",
                             prompt,
-                            max_tokens=20,
+                            max_tokens=50,  # a few words of field label + headroom so it isn't cut off
                         ).strip()
                         broad_category = broad_category.strip('."\'')
                         cache.set(cache_key, broad_category)
