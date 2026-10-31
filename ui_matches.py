@@ -1,5 +1,5 @@
 """
-UI Component for Tab 6: Generate Matches Summary
+UI Component for the Generate step: Matches Summary
 Shows a summary of all settings and data before generating matches
 """
 
@@ -9,7 +9,7 @@ from info import DEFAULT_MODEL
 
 
 def render_matches_tab():
-    """Render Tab 6: Generate Matches Summary"""
+    """Render the Generate step: Matches Summary"""
     
     try:
         data_ready = (
@@ -20,13 +20,13 @@ def render_matches_tab():
         if not data_ready:
             st.markdown("""
             <div class="info-card">
-                Review your configuration and generate compatibility matches. Upload data files in <strong>Tab 2</strong> to begin.
+                Review your configuration and generate compatibility matches. Upload data files in the <strong>Upload</strong> step to begin.
             </div>
             """, unsafe_allow_html=True)
             st.markdown("""
             <div class="token-warning">
                 ⚠️ <strong>No data uploaded yet!</strong><br>
-                Go to <strong>Tab 2</strong> to upload your mentees and mentors files.
+                Go to the <strong>Upload</strong> step to upload your mentees and mentors files.
             </div>
             """, unsafe_allow_html=True)
             st.stop()
@@ -149,15 +149,14 @@ def render_matches_tab():
         
         st.markdown("<br>", unsafe_allow_html=True)
         
-        # Button to navigate to processing tab
+        # Start the run and jump to Results; main() locks the rail while it runs
         if st.button("🚀 Generate Matches", type="primary", width='stretch'):
-            # Set flag to start processing in Tab 6
             st.session_state.start_processing = True
-            st.success("✅ Ready to process! Please navigate to **Tab 6: Processing & Results** to start.")
-            st.info("💡 The processing will begin automatically when you open Tab 6.")
+            st.session_state["step"] = 5
+            st.rerun()
     
     except Exception as e:
-        st.error(f"❌ Error in Tab 5 (Generate Matches): {e!s}")
+        st.error(f"❌ Error in Generate step: {e!s}")
         st.exception(e)
         import traceback
         with st.expander("🔍 Full Error Details", expanded=False):

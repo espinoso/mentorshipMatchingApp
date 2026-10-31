@@ -345,9 +345,10 @@ def generate_matrix_in_batches(mentees_df, mentors_df, batch_size=None):
         if spain_mentors and spain_mentees:
             st.info(f"🇪🇸 Found {spain_mentors} Spanish mentor(s) and {spain_mentees} Spanish mentee(s)")
 
-    # countries=["spain"] preserves the legacy hardcoded Spain-Spain restriction (see Task 6).
+    # Organizer toggle (Configure step); default ["spain"] preserves the legacy Spain-Spain rule.
     complete_matrix_df, filtered_matches = apply_country_restrictions(
-        complete_matrix_df, mentees_df, mentors_df, countries=["spain"]
+        complete_matrix_df, mentees_df, mentors_df,
+        countries=st.session_state.get("country_restrictions", ["spain"]),
     )
 
     # A missing country column yields a skip-marker; render it like the old warning, no filtering.
@@ -611,6 +612,50 @@ def get_reasoning_for_assignments(assignments, mentees_df, mentors_df):
         return {}
 
 
+# --------------------------------------------------------------------------- navigation + rail
+
+_STEPS = ["Configure", "Upload", "Customize Prompt", "Data Overview", "Generate", "Results"]
+
+
+def _reachable(has_data: bool, has_results: bool) -> set[int]:
+    s = {0, 1, 2}
+    if has_data:
+        s |= {3, 4}
+        if has_results:
+            s.add(5)
+    return s
+
+
+def _resolve_step(has_data: bool, has_results: bool) -> int:
+    """Stored step clamped into what's reachable (e.g. a new upload clears results)."""
+    step = st.session_state.get("step", 0)
+    if step not in _reachable(has_data, has_results):
+        step = 4 if has_data else 1
+        st.session_state["step"] = step
+    return step
+
+
+def _nav_to(step: int) -> None:
+    st.session_state["step"] = step
+
+
+def render_rail(current: int, has_data: bool, has_results: bool, clickable: bool = True) -> None:
+    """Step rail as real buttons: they rerun in place, unlike anchors which reset the session."""
+    reachable = _reachable(has_data, has_results) if clickable else set()
+    cols = st.columns(len(_STEPS))
+    for i, label in enumerate(_STEPS):
+        enabled = i in reachable
+        cols[i].button(
+            f"{'✓' if i < current else i + 1}  {label}",
+            key=f"rail_{i}",
+            type="primary" if i == current else "secondary",
+            use_container_width=True,
+            disabled=not enabled,
+            on_click=_nav_to if enabled else None,
+            args=(i,) if enabled else None,
+        )
+
+
 def main():
     # Password authentication check - must be first thing
     import os
@@ -703,6 +748,8 @@ def main():
         st.session_state.batch_size = 15
     if 'max_mentees_per_mentor' not in st.session_state:
         st.session_state.max_mentees_per_mentor = 2
+    if 'country_restrictions' not in st.session_state:
+        st.session_state.country_restrictions = ["spain"]
     if 'mentee_search' not in st.session_state:
         st.session_state.mentee_search = ""
     if 'model_choice' not in st.session_state:
@@ -725,44 +772,27 @@ def main():
     if 'api_key' not in st.session_state:
         st.session_state.api_key = _anthropic_key()
     
-    tab_names = [
-        "1️⃣ Configure Settings",
-        "2️⃣ Upload Data Files",
-        "3️⃣ Customize Prompt",
-        "4️⃣ Data Overview",
-        "5️⃣ Generate Matches",
-        "6️⃣ Processing & Results"
-    ]
-    
-    # WORKAROUND: Wrap tabs in columns to fix rendering issue (known Streamlit bug)
-    # This fixes the issue where tabs after position 4 don't render
-    cols = st.columns([0.999, 0.001])
-    with cols[0]:
-        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(tab_names)
-        
-        # TAB 1: Configure Settings
-        with tab1:
-            render_config_tab()
-        
-        # TAB 2: Upload Data Files
-        with tab2:
-            render_upload_tab()
-        
-        # TAB 3: Customize Prompt
-        with tab3:
-            render_prompt_tab()
-        
-        # TAB 4: Data Overview
-        with tab4:
-            render_overview_tab()
-        
-        # TAB 5: Generate Matches
-        with tab5:
-            render_matches_tab()
-        
-        # TAB 6: Processing & Results
-        with tab6:
-            render_processing_tab()
+    has_data = (
+        st.session_state.get("mentees_df") is not None
+        and st.session_state.get("mentors_df") is not None
+    )
+    has_results = st.session_state.get("matches") is not None
+    if st.session_state.get("start_processing"):
+        render_rail(5, has_data, has_results, clickable=False)  # locked: a stray click can't derail the run
+        render_processing_tab()  # runs the pipeline this rerun, then clears start_processing
+        return
+    step = _resolve_step(has_data, has_results)
+    render_rail(step, has_data, has_results)
+
+    (
+        render_config_tab,
+        render_upload_tab,
+        render_prompt_tab,
+        render_overview_tab,
+        render_matches_tab,
+        render_processing_tab,
+    )[step]()
+
 
 if __name__ == "__main__":
     main()

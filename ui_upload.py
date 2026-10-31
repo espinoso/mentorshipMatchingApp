@@ -53,6 +53,15 @@ LOG_CONTAINER_CSS = """
 </style>
 """
 
+def _store_df(df_key, df):
+    """Store an uploaded dataframe; a changed one invalidates any earlier results."""
+    old = st.session_state.get(df_key)
+    if old is None or not old.equals(df):  # POST files are re-stored on every rerun
+        for k in ('matrix_df', 'assignments', 'matches'):
+            st.session_state[k] = None
+    st.session_state[df_key] = df
+
+
 FILE_TYPE_CONFIG = {
     'mentee': {
         'icon': '👥',
@@ -258,7 +267,7 @@ def run_file_processing(file_type: FileType):
     if processed_df is not None:
         config = FILE_TYPE_CONFIG[file_type]
         st.session_state[get_state_key(file_type, 'processed_df')] = processed_df
-        st.session_state[config['df_key']] = processed_df
+        _store_df(config['df_key'], processed_df)
         st.session_state[get_state_key(file_type, 'processing_info')] = processing_info
         
         if processing_info and 'messages' in processing_info:
@@ -495,7 +504,7 @@ def render_file_upload_section(file_type: FileType, any_processing: bool, other_
                 "File is already in the correct format and ready to use.",
                 "success-card"
             )
-            st.session_state[config['df_key']] = df
+            _store_df(config['df_key'], df)
             st.session_state[get_state_key(file_type, 'processed_df')] = None
             st.info(f"📄 **Using POST format file** ({len(df)} {file_type}s)")
         elif file_format == 'PRE' and already_processed:
@@ -588,7 +597,7 @@ def render_upload_tab():
     if not st.session_state.api_key:
         render_html_card(
             "⚠️ <strong>API Key Required</strong><br>"
-            "Please set ANTHROPIC_API_KEY (see Tab 1) before uploading data files.",
+            "Please set ANTHROPIC_API_KEY (see the Configure step) before uploading data files.",
             "conflict-warning"
         )
         st.stop()
