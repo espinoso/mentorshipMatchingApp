@@ -14,7 +14,7 @@ import pandas as pd
 import streamlit as st
 
 from info import MENTEE_COLUMNS, MENTOR_COLUMNS
-from matching import check_mentor_conflicts, hungarian_assignment
+from matching import apply_country_restrictions, check_mentor_conflicts, hungarian_assignment
 from utils import is_debug_mode, sanitize_spreadsheet_df, show_debug_info
 from validation import analyze_score_distribution, validate_and_flag_matches
 from visualization import create_heatmap
@@ -432,6 +432,17 @@ def render_processing_tab():
             )
             
             if matrix_df is not None:
+                # Enforce the sidebar country rule (e.g. Spain↔Spain) before assigning: zero the
+                # same-country cells so the solver never picks them. Default-on, so this runs live.
+                restrictions = st.session_state.get("country_restrictions", [])
+                matrix_df, blocked = apply_country_restrictions(
+                    matrix_df, st.session_state.mentees_df, st.session_state.mentors_df,
+                    countries=restrictions)
+                if restrictions:
+                    if blocked and "skipped" in blocked[0]:
+                        st.warning(f"⚠️ Country restriction not applied: {blocked[0]['skipped']}.")
+                    else:
+                        st.caption(f"🌍 Country rule blocked {len(blocked)} same-country pair(s) before assignment.")
                 st.session_state.matrix_df = matrix_df
                 max_mentees_per_mentor = st.session_state.get('max_mentees_per_mentor', 2)
                 result = hungarian_assignment(matrix_df, max_mentees_per_mentor=max_mentees_per_mentor)
