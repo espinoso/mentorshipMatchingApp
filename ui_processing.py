@@ -180,8 +180,9 @@ def _numeric(value):
     return int(m.group()) if m else 0
 
 
-def _match_rows(matches, mentees_df, mentors_df, flagged_pairs):
+def _match_rows(matches, mentees_df, mentors_df, flagged_map):
     """Flatten matches into rows carrying the fields the list filters/sorts/renders on.
+    flagged_map is {(mentee, mentor): [reasons]}; a row's issues drive its review note.
     Mentee country = affiliated-university country; mentor country = country of origin."""
     # Match ids as strings — assignment ids are strings while the df id column may be int.
     mentee_ids = mentees_df[MENTEE_COLUMNS['id']].astype(str)
@@ -195,13 +196,14 @@ def _match_rows(matches, mentees_df, mentors_df, flagged_pairs):
         for m in md['matches']:
             tid = m['mentor_id']
             trow = mentors_df[mentor_ids == str(tid)]
+            issues = flagged_map.get((str(mid), str(tid)), [])
             rows.append({
                 'mentee_id': mid, 'mentor_id': tid,
                 'score': m['match_percentage'], 'quality': m['match_quality'],
                 'mentee_field': mentee_field, 'mentor_field': _col_val(trow, MENTOR_COLUMNS['field']) or '',
                 'mentee_country': mentee_country,
                 'mentor_country': _col_val(trow, MENTOR_COLUMNS['country_of_origin']),
-                'flagged': (str(mid), str(tid)) in flagged_pairs,
+                'flagged': bool(issues), 'issues': issues,
             })
     return rows
 
@@ -272,11 +274,13 @@ def _render_match_card(r):
     header = (
         f'<h4>Mentee {mentee_id} {_country_token(r["mentee_country"])} {_field_label(r["mentee_field"])}'
         f' → Mentor {mentor_id} {_country_token(r["mentor_country"])} {_field_label(r["mentor_field"])}</h4>'
-        f'<p><span class="percentage-badge {cls}">{int(r["score"])}% - {quality}</span>'
-        f'{" 🚩" if r["flagged"] else ""}</p>'
+        f'<p><span class="percentage-badge {cls}">{int(r["score"])}% - {quality}</span></p>'
     )
     with st.container(border=True):
         st.markdown(header, unsafe_allow_html=True)
+        if r.get('flagged'):
+            reasons = "; ".join(html.escape(str(i)) for i in r.get('issues', [])) or "flagged by validation checks"
+            st.warning(f"⚠️ **Needs review** — {reasons}")
         cache = st.session_state.setdefault("reasoning_cache", {})
         ck = (str(r['mentee_id']), str(r['mentor_id']))
         if st.button("💡 Why this match?", key=f"why_{r['mentee_id']}_{r['mentor_id']}") and ck not in cache:
@@ -339,6 +343,7 @@ def render_processing_tab():
     
     # Check if we should start processing (triggered from the Generate step)
     if st.session_state.get('start_processing', False):
+        st.subheader("⚡ Generating matches")
         st.session_state.start_processing = False
         st.session_state.last_match_time = datetime.now()
         # Drop any prior results so a failed/empty re-run can't re-display stale matches as if fresh.
@@ -489,7 +494,6 @@ def render_processing_tab():
         _back_to_generate()
         return
 
-    st.divider()
     st.subheader("🎯 Results")
     if st.session_state.assignments:
         _render_results_header(st.session_state.assignments, st.session_state.get('score_stats'))
@@ -583,12 +587,12 @@ def render_review_tab():
         return
 
     st.subheader("🔍 Review matches")
-    flagged_pairs = {
-        (str(f['mentee_id']), str(f['mentor_id']))
+    flagged_map = {
+        (str(f['mentee_id']), str(f['mentor_id'])): f.get('issues', [])
         for f in (st.session_state.get('flagged_matches') or [])
     }
     rows = _match_rows(st.session_state.matches, st.session_state.mentees_df,
-                       st.session_state.mentors_df, flagged_pairs)
+                       st.session_state.mentors_df, flagged_map)
 
     ctrl_search, ctrl_sort, ctrl_review = st.columns([3, 2, 2])
     with ctrl_search:
@@ -604,7 +608,7 @@ def render_review_tab():
         )
     with ctrl_review:
         review_only = st.checkbox(
-            f"⚠️ Needs review only ({len(flagged_pairs)})",
+            f"⚠️ Needs review only ({len(flagged_map)})",
             value=st.session_state.get('review_only', False),
         )
         st.session_state.review_only = review_only
