@@ -75,25 +75,21 @@ def _distribution_bar(stats):
         f'<span style="color:{color};">■</span> {label} {c}' for label, c, color in counts
     )
     return (
-        f'<div style="display:flex;height:14px;border-radius:7px;overflow:hidden;margin:0.35rem 0;">{segs}</div>'
-        f'<div style="font-size:0.8rem;color:#777;">{legend}</div>'
+        f'<div style="display:flex;height:14px;border-radius:7px;overflow:hidden;margin:0.5rem 0 0.8rem;">{segs}</div>'
+        f'<div style="font-size:0.8rem;color:#777;margin-bottom:0.4rem;">{legend}</div>'
     )
 
 
-def _render_results_header(assignments, stats, flagged):
-    """Compact results header: one summary line + a slim distribution bar + the flagged review list."""
+def _render_results_header(assignments, stats):
+    """Compact results header: one summary line + a slim distribution bar. Flagged matches are
+    acted on in the Review step (via its 'Needs review only' filter), not a read-only list here."""
     scores = [s for _, _, s in assignments]
     avg = np.mean(scores) if scores else 0
-    review = f"⚠️ {len(flagged)} to review" if flagged else "✅ all clear"
+    flagged_n = len(st.session_state.get('flagged_matches') or [])
+    review = f"⚠️ {flagged_n} to review" if flagged_n else "✅ all clear"
     st.markdown(f"#### ✅ {len(assignments)} matched &nbsp;·&nbsp; avg {avg:.0f}% &nbsp;·&nbsp; {review}")
     if stats:
         st.markdown(_distribution_bar(stats), unsafe_allow_html=True)
-    if flagged:
-        with st.expander(f"🚩 Review {len(flagged)} flagged match(es)"):
-            for fm in flagged:
-                st.markdown(f"**Mentee {fm['mentee_id']} → Mentor {fm['mentor_id']}** ({fm['score']}%)")
-                for issue in fm['issues']:
-                    st.caption(f"• {issue}")
 
 
 def get_country_flag(country_name):
@@ -487,159 +483,150 @@ def render_processing_tab():
         render_processing_summary()
         st.divider()
     
-    # Display results
-    if st.session_state.matches:
-        st.divider()
-        if st.session_state.assignments:
-            _render_results_header(
-                st.session_state.assignments,
-                st.session_state.get('score_stats'),
-                st.session_state.get('flagged_matches') or [],
-            )
-        
-        # Show score distribution analysis (only in debug mode)
-        if is_debug_mode() and st.session_state.matrix_df is not None:
-            st.divider()
-            score_distribution = analyze_score_distribution(st.session_state.matrix_df)
-            st.session_state.score_distribution = score_distribution
-            st.divider()
-        
-        # Show heatmap
-        if st.session_state.matrix_df is not None:
-            st.subheader("🔥 Compatibility Heatmap")
-            st.caption("Grouped by field so same-field matches cluster · blue outline = chosen match · hover a cell for detail")
-
-            mentee_fields = {
-                str(r[MENTEE_COLUMNS['id']]): r[MENTEE_COLUMNS['field']]
-                for _, r in st.session_state.mentees_df.iterrows()
-            }
-            mentor_fields = {
-                str(r[MENTOR_COLUMNS['id']]): r[MENTOR_COLUMNS['field']]
-                for _, r in st.session_state.mentors_df.iterrows()
-            }
-            fig = create_heatmap(st.session_state.matrix_df, st.session_state.assignments,
-                                 mentee_fields, mentor_fields)
-            # Pass config parameter explicitly to avoid deprecation warning
-            # This tells Streamlit/Plotly to use config dict instead of keyword arguments
-            st.plotly_chart(
-                fig, 
-                use_container_width=True, 
-                config={
-                    'displayModeBar': True,
-                    'displaylogo': False
-                }
-            )
-            
-            # Option to download matrix
-            csv = st.session_state.matrix_df.to_csv()
-            st.download_button(
-                label="📥 Download Full Matrix (CSV)",
-                data=csv,
-                file_name=f"compatibility_matrix_{time.strftime('%Y%m%d_%H%M%S')}.csv",
-                mime="text/csv"
-            )
-        
-        # Check for conflicts
-        max_mentees_per_mentor = st.session_state.get('max_mentees_per_mentor', 2)
-        conflicts = check_mentor_conflicts(st.session_state.matches, max_mentees_per_mentor=max_mentees_per_mentor)
-        
-        if conflicts:
-            if is_debug_mode():
-                st.markdown("""
-                <div class="conflict-warning">
-                    <strong>⚠️ Warning:</strong> Unexpected conflicts detected. Please review.
-                </div>
-                """, unsafe_allow_html=True)
-            else:
-                st.warning("⚠️ Some conflicts detected. Please review.")
-        else:
-            st.success(f"✅ All constraints satisfied: No mentor has >{max_mentees_per_mentor} mentee(s)!")
-        
-        # Results display
-        st.divider()
-        
-        # Export — plain is instant; the reasoning version is generated on demand (it costs tokens).
-        st.subheader("📥 Export Results")
-        stamp = time.strftime('%Y%m%d_%H%M%S')
-        xlsx_mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        col_plain, col_reason = st.columns(2)
-        with col_plain:
-            st.download_button(
-                "📥 Download matches",
-                _matches_report_bytes(st.session_state.matches, st.session_state.mentees_df,
-                                      st.session_state.mentors_df, st.session_state.assignments),
-                f"matches_{stamp}.xlsx", xlsx_mime, width='stretch',
-            )
-        with col_reason:
-            if st.button("🧠 Prepare matches + reasonings", width='stretch',
-                         help="Generates a Claude explanation for every match, then offers the download."):
-                from app import get_reasoning_for_assignments
-                with st.spinner(f"Generating reasonings for {len(st.session_state.assignments)} matches…"):
-                    rdict = get_reasoning_for_assignments(
-                        st.session_state.assignments, st.session_state.mentees_df, st.session_state.mentors_df)
-                    rby = {(str(k[0]), str(k[1])): v for k, v in rdict.items()}
-                    st.session_state.export_with_reasoning = _matches_report_bytes(
-                        st.session_state.matches, st.session_state.mentees_df,
-                        st.session_state.mentors_df, st.session_state.assignments, rby)
-            if st.session_state.get("export_with_reasoning"):
-                st.download_button(
-                    "📥 Download matches + reasonings",
-                    st.session_state.export_with_reasoning,
-                    f"matches_reasonings_{stamp}.xlsx", xlsx_mime, width='stretch', type="primary",
-                )
-        
-        st.divider()
-        
-        # Match list — search / sort / needs-review, then cards
-        st.subheader("Matches")
-        flagged_pairs = {
-            (str(f['mentee_id']), str(f['mentor_id']))
-            for f in (st.session_state.get('flagged_matches') or [])
-        }
-        rows = _match_rows(st.session_state.matches, st.session_state.mentees_df,
-                           st.session_state.mentors_df, flagged_pairs)
-
-        ctrl_search, ctrl_sort, ctrl_review = st.columns([3, 2, 2])
-        with ctrl_search:
-            query = st.text_input(
-                "Search matches", value=st.session_state.get('mentee_search', ''),
-                placeholder="Search by mentee/mentor ID or field…", label_visibility="collapsed",
-            ).strip().lower()
-            st.session_state.mentee_search = query
-        with ctrl_sort:
-            sort_by = st.selectbox(
-                "Sort by", ["Mentee ID", "Score: high → low", "Score: low → high", "Quality"],
-                label_visibility="collapsed",
-            )
-        with ctrl_review:
-            review_only = st.checkbox(
-                f"⚠️ Needs review only ({len(flagged_pairs)})",
-                value=st.session_state.get('review_only', False),
-            )
-            st.session_state.review_only = review_only
-
-        def _hit(r):
-            if not query:
-                return True
-            return query in f"{r['mentee_id']} {r['mentor_id']} {r['mentee_field']} {r['mentor_field']}".lower()
-
-        shown = [r for r in rows if _hit(r) and (not review_only or r['flagged'])]
-        if sort_by == "Score: high → low":
-            shown.sort(key=lambda r: -r['score'])
-        elif sort_by == "Score: low → high":
-            shown.sort(key=lambda r: r['score'])
-        elif sort_by == "Quality":
-            shown.sort(key=lambda r: _QUALITY_ORDER.get(r['quality'], 9))
-        else:
-            shown.sort(key=lambda r: _numeric(r['mentee_id']))
-
-        st.caption(f"Showing {len(shown)} of {len(rows)} matches")
-        if not shown:
-            st.info("No matches for these filters.")
-        for r in shown:
-            _render_match_card(r)
-    else:
-        # Show waiting message if no matches yet
-        st.info("👆 Click 'Generate Matches' in the Generate step to start the matching process.")
+    # Results step: the at-a-glance overview + heatmap. The matches list lives in the Review step.
+    if not st.session_state.matches:
+        st.info("👆 Generate matches in the Generate step to see results.")
         _back_to_generate()
+        return
+
+    st.divider()
+    st.subheader("🎯 Results")
+    if st.session_state.assignments:
+        _render_results_header(st.session_state.assignments, st.session_state.get('score_stats'))
+
+    # Capacity banner — up top with the summary.
+    max_mentees_per_mentor = st.session_state.get('max_mentees_per_mentor', 2)
+    if check_mentor_conflicts(st.session_state.matches, max_mentees_per_mentor=max_mentees_per_mentor):
+        st.warning(f"⚠️ Some mentors are over the cap of {max_mentees_per_mentor} — see the Review step.")
+    else:
+        st.success(f"✅ Every mentor is within the cap (≤{max_mentees_per_mentor} mentees).")
+
+    # Jump into the Review step, optionally filtered to the ones needing a look.
+    flagged_n = len(st.session_state.get('flagged_matches') or [])
+    go_all, go_flagged = st.columns(2)
+    with go_all:
+        if st.button("📋 Review all matches →", width='stretch', type="primary"):
+            st.session_state.review_only = False
+            st.session_state["step"] = 4
+            st.rerun()
+    with go_flagged:
+        if st.button(f"⚠️ Review {flagged_n} flagged →", width='stretch', disabled=flagged_n == 0):
+            st.session_state.review_only = True
+            st.session_state["step"] = 4
+            st.rerun()
+
+    st.divider()
+
+    # Export — up with the results (plain is instant; the reasoning version costs tokens, on demand).
+    st.subheader("📥 Export")
+    stamp = time.strftime('%Y%m%d_%H%M%S')
+    xlsx_mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    col_plain, col_reason = st.columns(2)
+    with col_plain:
+        st.download_button(
+            "📥 Download matches",
+            _matches_report_bytes(st.session_state.matches, st.session_state.mentees_df,
+                                  st.session_state.mentors_df, st.session_state.assignments),
+            f"matches_{stamp}.xlsx", xlsx_mime, width='stretch',
+        )
+    with col_reason:
+        if st.button("🧠 Prepare matches + reasonings", width='stretch',
+                     help="Generates a Claude explanation for every match, then offers the download."):
+            from app import get_reasoning_for_assignments
+            with st.spinner(f"Generating reasonings for {len(st.session_state.assignments)} matches…"):
+                rdict = get_reasoning_for_assignments(
+                    st.session_state.assignments, st.session_state.mentees_df, st.session_state.mentors_df)
+                rby = {(str(k[0]), str(k[1])): v for k, v in rdict.items()}
+                st.session_state.export_with_reasoning = _matches_report_bytes(
+                    st.session_state.matches, st.session_state.mentees_df,
+                    st.session_state.mentors_df, st.session_state.assignments, rby)
+        if st.session_state.get("export_with_reasoning"):
+            st.download_button(
+                "📥 Download matches + reasonings",
+                st.session_state.export_with_reasoning,
+                f"matches_reasonings_{stamp}.xlsx", xlsx_mime, width='stretch', type="primary",
+            )
+
+    st.divider()
+
+    # Heatmap — the full-matrix download sits next to the title so it isn't lost below the chart.
+    if st.session_state.matrix_df is not None:
+        hm_title, hm_dl = st.columns([3, 1])
+        with hm_title:
+            st.subheader("🔥 Compatibility Heatmap")
+        with hm_dl:
+            st.download_button("📥 Full matrix (CSV)", st.session_state.matrix_df.to_csv(),
+                               f"compatibility_matrix_{stamp}.csv", "text/csv", width='stretch')
+        st.caption("Grouped by field so same-field matches cluster · blue outline = chosen match · hover a cell for detail")
+        mentee_fields = {
+            str(r[MENTEE_COLUMNS['id']]): r[MENTEE_COLUMNS['field']]
+            for _, r in st.session_state.mentees_df.iterrows()
+        }
+        mentor_fields = {
+            str(r[MENTOR_COLUMNS['id']]): r[MENTOR_COLUMNS['field']]
+            for _, r in st.session_state.mentors_df.iterrows()
+        }
+        fig = create_heatmap(st.session_state.matrix_df, st.session_state.assignments,
+                             mentee_fields, mentor_fields)
+        st.plotly_chart(fig, use_container_width=True,
+                        config={'displayModeBar': True, 'displaylogo': False})
+
+    if is_debug_mode() and st.session_state.matrix_df is not None:
+        st.session_state.score_distribution = analyze_score_distribution(st.session_state.matrix_df)
+
+
+def render_review_tab():
+    """Review step: the matches list where organizers search, filter, and override."""
+    if not st.session_state.get('matches'):
+        st.info("👆 Generate matches first.")
+        _back_to_generate()
+        return
+
+    st.subheader("🔍 Review matches")
+    flagged_pairs = {
+        (str(f['mentee_id']), str(f['mentor_id']))
+        for f in (st.session_state.get('flagged_matches') or [])
+    }
+    rows = _match_rows(st.session_state.matches, st.session_state.mentees_df,
+                       st.session_state.mentors_df, flagged_pairs)
+
+    ctrl_search, ctrl_sort, ctrl_review = st.columns([3, 2, 2])
+    with ctrl_search:
+        query = st.text_input(
+            "Search matches", value=st.session_state.get('mentee_search', ''),
+            placeholder="Search by mentee/mentor ID or field…", label_visibility="collapsed",
+        ).strip().lower()
+        st.session_state.mentee_search = query
+    with ctrl_sort:
+        sort_by = st.selectbox(
+            "Sort by", ["Mentee ID", "Score: high → low", "Score: low → high", "Quality"],
+            label_visibility="collapsed",
+        )
+    with ctrl_review:
+        review_only = st.checkbox(
+            f"⚠️ Needs review only ({len(flagged_pairs)})",
+            value=st.session_state.get('review_only', False),
+        )
+        st.session_state.review_only = review_only
+
+    def _hit(r):
+        if not query:
+            return True
+        return query in f"{r['mentee_id']} {r['mentor_id']} {r['mentee_field']} {r['mentor_field']}".lower()
+
+    shown = [r for r in rows if _hit(r) and (not review_only or r['flagged'])]
+    if sort_by == "Score: high → low":
+        shown.sort(key=lambda r: -r['score'])
+    elif sort_by == "Score: low → high":
+        shown.sort(key=lambda r: r['score'])
+    elif sort_by == "Quality":
+        shown.sort(key=lambda r: _QUALITY_ORDER.get(r['quality'], 9))
+    else:
+        shown.sort(key=lambda r: _numeric(r['mentee_id']))
+
+    st.caption(f"Showing {len(shown)} of {len(rows)} matches")
+    if not shown:
+        st.info("No matches for these filters.")
+    for r in shown:
+        _render_match_card(r)
 
