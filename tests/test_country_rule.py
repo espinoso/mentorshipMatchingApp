@@ -1,9 +1,10 @@
 import pandas as pd
 
 from info import MENTEE_COLUMNS, MENTOR_COLUMNS
-from matching_core import apply_country_restrictions
+from matching_core import SAME_COUNTRY_PENALTY, apply_country_restrictions
 
 MC, EC = MENTOR_COLUMNS["country"], MENTEE_COLUMNS["country"]
+PENALIZED = max(0.0, 50.0 - SAME_COUNTRY_PENALTY)  # a same-country 50-cell after the soft penalty
 
 
 def _frames(mentor_countries, mentee_countries):
@@ -32,10 +33,10 @@ def test_default_is_no_restriction():
     assert filtered == []
 
 
-def test_avoid_same_country_zeroes_equal_non_empty():
+def test_avoid_same_country_penalizes_equal_non_empty():
     matrix, mentees, mentors = _frames(["Portugal", " SPAIN ", None], ["portugal", "Spain", None])
     out, filtered = apply_country_restrictions(matrix, mentees, mentors, avoid_same_country=True)
-    assert out.loc["1", "101"] == 0 and out.loc["2", "102"] == 0
+    assert out.loc["1", "101"] == PENALIZED and out.loc["2", "102"] == PENALIZED
     assert out.loc["1", "102"] == 50 and out.loc["3", "103"] == 50  # empty != empty
     assert {(f["mentor_id"], f["mentee_id"]) for f in filtered} == {("1", "101"), ("2", "102")}
     assert all(f["original_score"] == 50.0 and f["reason"] for f in filtered)
@@ -44,7 +45,7 @@ def test_avoid_same_country_zeroes_equal_non_empty():
 def test_countries_spain_only_leaves_portugal():
     matrix, mentees, mentors = _frames(["Spain", "Portugal"], ["Spain", "Portugal"])
     out, filtered = apply_country_restrictions(matrix, mentees, mentors, countries=["spain"])
-    assert out.loc["1", "101"] == 0
+    assert out.loc["1", "101"] == PENALIZED
     assert out.loc["2", "102"] == 50
     assert [(f["mentor_id"], f["mentee_id"]) for f in filtered] == [("1", "101")]
 
@@ -54,7 +55,7 @@ def test_countries_takes_precedence_over_avoid_same_country():
     out, _ = apply_country_restrictions(
         matrix, mentees, mentors, avoid_same_country=True, countries=["spain"]
     )
-    assert out.loc["1", "101"] == 0 and out.loc["2", "102"] == 50
+    assert out.loc["1", "101"] == PENALIZED and out.loc["2", "102"] == 50
 
 
 def test_missing_column_returns_unchanged_with_marker():
@@ -70,11 +71,11 @@ def test_missing_column_returns_unchanged_with_marker():
     assert filtered == [{"skipped": "mentee country column missing"}]
 
 
-def test_zero_score_cells_zeroed_but_not_reported():
+def test_zero_score_cells_stay_zero_and_not_reported():
     matrix, mentees, mentors = _frames(["Spain"], ["Spain"])
     matrix.loc["1", "101"] = 0.0
     out, filtered = apply_country_restrictions(matrix, mentees, mentors, avoid_same_country=True)
-    assert out.loc["1", "101"] == 0 and filtered == []
+    assert out.loc["1", "101"] == 0 and filtered == []  # 0 - penalty clips back to 0
 
 
 def test_input_matrix_not_mutated():
@@ -89,7 +90,7 @@ def test_empty_countries_list_does_not_disable_avoid_flag():
     out, filtered = apply_country_restrictions(
         matrix, mentees, mentors, avoid_same_country=True, countries=[]
     )
-    assert out.loc["1", "101"] == 0
+    assert out.loc["1", "101"] == PENALIZED
     assert [(f["mentor_id"], f["mentee_id"]) for f in filtered] == [("1", "101")]
 
 

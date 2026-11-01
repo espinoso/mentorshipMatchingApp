@@ -432,17 +432,18 @@ def render_processing_tab():
             )
             
             if matrix_df is not None:
-                # Enforce the sidebar country rule (e.g. Spain↔Spain) before assigning: zero the
-                # same-country cells so the solver never picks them. Default-on, so this runs live.
+                # Apply the sidebar country rule (e.g. Spain↔Spain) before assigning: a soft penalty
+                # that deprioritizes same-country pairs so the solver avoids them when it can, but
+                # still allows a strong one when it's the best option. Default-on, so this runs live.
                 restrictions = st.session_state.get("country_restrictions", [])
-                matrix_df, blocked = apply_country_restrictions(
+                matrix_df, penalized = apply_country_restrictions(
                     matrix_df, st.session_state.mentees_df, st.session_state.mentors_df,
                     countries=restrictions)
                 if restrictions:
-                    if blocked and "skipped" in blocked[0]:
-                        st.warning(f"⚠️ Country restriction not applied: {blocked[0]['skipped']}.")
+                    if penalized and "skipped" in penalized[0]:
+                        st.warning(f"⚠️ Country rule not applied: {penalized[0]['skipped']}.")
                     else:
-                        st.caption(f"🌍 Country rule blocked {len(blocked)} same-country pair(s) before assignment.")
+                        st.caption(f"🌍 Country rule deprioritized {len(penalized)} same-country pair(s) before assignment.")
                 st.session_state.matrix_df = matrix_df
                 max_mentees_per_mentor = st.session_state.get('max_mentees_per_mentor', 2)
                 result = hungarian_assignment(matrix_df, max_mentees_per_mentor=max_mentees_per_mentor)
