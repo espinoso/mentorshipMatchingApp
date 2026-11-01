@@ -201,6 +201,54 @@ def _match_rows(matches, mentees_df, mentors_df, flagged_pairs):
 _QUALITY_ORDER = {'Excellent': 0, 'Strong': 1, 'Good': 2, 'Fair': 3, 'Poor': 4}
 
 
+def _match_quality(score):
+    """Quality band for a match badge (matches the pipeline's thresholds; styled classes only)."""
+    return 'Excellent' if score >= 90 else 'Strong' if score >= 75 else 'Good' if score >= 60 else 'Fair'
+
+
+def _alternative_mentors(mentee_id, current_mentor_id, n=6):
+    """Top-N mentors for this mentee by matrix score, excluding the current one: (id, field, score)."""
+    matrix = st.session_state.get('matrix_df')
+    if matrix is None or str(mentee_id) not in matrix.columns:
+        return []
+    mentors_df = st.session_state.mentors_df
+    mentor_ids = mentors_df[MENTOR_COLUMNS['id']].astype(str)
+    out = []
+    for mid, score in matrix[str(mentee_id)].sort_values(ascending=False).items():
+        mid = str(mid)
+        if mid == str(current_mentor_id):
+            continue
+        field = _col_val(mentors_df[mentor_ids == mid], MENTOR_COLUMNS['field']) or ''
+        out.append((mid, field, round(float(score))))
+        if len(out) >= n:
+            break
+    return out
+
+
+def _apply_override(mentee_id, new_mentor_id):
+    """Guarded swap: reassign a mentee to a new mentor. Updates assignments + matches, clears the
+    now-stale cached reasoning, and recomputes flags/stats. No global re-optimization."""
+    matrix = st.session_state.matrix_df
+    score = round(float(matrix.loc[str(new_mentor_id), str(mentee_id)]))
+    st.session_state.assignments = [
+        (m, new_mentor_id, score) if str(m) == str(mentee_id) else (m, mt, s)
+        for m, mt, s in st.session_state.assignments
+    ]
+    for md in st.session_state.matches:
+        if str(md['mentee_id']) == str(mentee_id):
+            md['matches'][0].update({
+                'mentor_id': new_mentor_id, 'match_percentage': score,
+                'match_quality': _match_quality(score), 'reasoning': None,
+            })
+    cache = st.session_state.get('reasoning_cache', {})
+    for key in [k for k in cache if str(k[0]) == str(mentee_id)]:
+        cache.pop(key, None)
+    flagged, stats = validate_and_flag_matches(
+        st.session_state.matches, st.session_state.mentees_df, st.session_state.mentors_df, render=False)
+    st.session_state.flagged_matches = flagged
+    st.session_state.score_stats = stats
+
+
 def _render_match_card(r):
     """One match card: header (ids, country, field) + badge + on-demand reasoning."""
     # Survey-derived text is escaped and the CSS class is allowlisted (values render via unsafe HTML).
@@ -225,6 +273,26 @@ def _render_match_card(r):
                                                st.session_state.mentees_df, st.session_state.mentors_df)
         if ck in cache:
             st.markdown(f"**Reasoning:** {cache[ck]}")
+
+        # Guarded override: reassign this mentee to a different mentor (warns if over capacity).
+        with st.expander("🔀 Change mentor"):
+            alts = _alternative_mentors(r['mentee_id'], r['mentor_id'])
+            if not alts:
+                st.caption("No alternative mentors available.")
+            else:
+                labels = {f"Mentor {mid} · {field or 'N/A'} · {score}%": mid for mid, field, score in alts}
+                pick = st.selectbox("Alternatives (by score)", list(labels),
+                                    key=f"alt_{r['mentee_id']}", label_visibility="collapsed")
+                if st.button("Use this mentor", key=f"swap_{r['mentee_id']}"):
+                    new_mentor = labels[pick]
+                    cap = st.session_state.get('max_mentees_per_mentor', 2)
+                    load = sum(1 for _, mt, _ in st.session_state.assignments if str(mt) == str(new_mentor))
+                    _apply_override(r['mentee_id'], new_mentor)
+                    if load >= cap:
+                        st.toast(f"⚠️ Mentor {new_mentor} now has {load + 1} mentees (cap {cap})", icon="⚠️")
+                    else:
+                        st.toast(f"✅ Reassigned mentee {r['mentee_id']} → mentor {new_mentor}")
+                    st.rerun()
 
 
 def _back_to_generate():
@@ -372,10 +440,7 @@ def render_processing_tab():
                             'rank': 1,
                             'mentor_id': mentor,
                             'match_percentage': score,
-                            'match_quality': (
-                                'Excellent' if score >= 90 else 'Strong' if score >= 75
-                                else 'Good' if score >= 60 else 'Fair'
-                            ),
+                            'match_quality': _match_quality(score),
                             'reasoning': None,
                         }],
                     }
