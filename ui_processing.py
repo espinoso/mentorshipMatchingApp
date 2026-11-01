@@ -15,7 +15,6 @@ import streamlit as st
 
 from info import MENTEE_COLUMNS, MENTOR_COLUMNS
 from matching import check_mentor_conflicts, hungarian_assignment
-from progress_ui import render_processing_summary
 from utils import is_debug_mode, sanitize_spreadsheet_df, show_debug_info
 from validation import analyze_score_distribution, validate_and_flag_matches
 from visualization import create_heatmap
@@ -483,11 +482,6 @@ def render_processing_tab():
                 st.session_state.score_stats = score_stats
                 
                 st.balloons()
-    
-    # Show processing summary if processing is complete
-    if st.session_state.get('matches') and 'batch_progress' in st.session_state:
-        render_processing_summary()
-        st.divider()
     
     # Results step: the at-a-glance overview + heatmap. The matches list lives in the Review step.
     if not st.session_state.matches:

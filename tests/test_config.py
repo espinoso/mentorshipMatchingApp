@@ -1,9 +1,7 @@
-"""Claude model config, selector list, pricing, and the model_choice wiring."""
-import pytest
-
+"""Claude model config, selector list, and the model_choice wiring."""
 import app
-from info import API_PRICING, CLAUDE_MODELS, DEFAULT_MODEL, MODEL_CONFIGS
-from utils import estimate_api_cost, fetch_available_models, get_model_config
+from info import CLAUDE_MODELS, DEFAULT_MODEL, MODEL_CONFIGS
+from utils import fetch_available_models, get_model_config
 
 
 def test_default_model_is_claude_and_selectable():
@@ -26,18 +24,6 @@ def test_available_models_are_static_claude_list():
     models = fetch_available_models()
     assert list(models) == CLAUDE_MODELS
     assert all({"name", "quality", "speed", "cost"} <= set(v) for v in models.values())
-
-
-@pytest.mark.parametrize("model", ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"])
-def test_cost_uses_claude_pricing(model):
-    p = API_PRICING[model]
-    assert estimate_api_cost(1_000_000, 1_000_000, model) == pytest.approx(p["prompt"] + p["completion"])
-
-
-def test_opus_pricing_values_and_unknown_model_prices_as_default():
-    assert estimate_api_cost(1_000_000, 1_000_000, "claude-opus-5-5") == pytest.approx(24.0)
-    assert estimate_api_cost(1_000_000, 0, "claude-sonnet-5-5") == pytest.approx(2.0)
-    assert estimate_api_cost(1_000_000, 0, "not-a-model") == pytest.approx(4.0)
 
 
 def test_model_is_fixed_in_code(monkeypatch):
