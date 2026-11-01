@@ -3,6 +3,7 @@ UI Component for Tab 7: Processing & Results
 Handles the matching generation process, results display, and export functionality
 """
 
+import html
 import re
 import time
 from datetime import datetime
@@ -143,7 +144,7 @@ def _country_token(country):
     if not country or pd.isna(country):
         return ""
     name = str(country).strip()
-    return get_country_flag(name) or name.title()
+    return get_country_flag(name) or html.escape(name.title())
 
 
 def _field_label(field):
@@ -152,7 +153,7 @@ def _field_label(field):
         return ""
     return (
         '<span style="background:#F5F5F7;padding:0.2rem 0.5rem;border-radius:4px;'
-        f'font-size:0.85rem;margin-left:0.4rem;">{field}</span>'
+        f'font-size:0.85rem;margin-left:0.4rem;">{html.escape(str(field))}</span>'
     )
 
 
@@ -202,10 +203,15 @@ _QUALITY_ORDER = {'Excellent': 0, 'Strong': 1, 'Good': 2, 'Fair': 3, 'Poor': 4}
 
 def _render_match_card(r):
     """One match card: header (ids, country, field) + badge + on-demand reasoning."""
+    # Survey-derived text is escaped and the CSS class is allowlisted (values render via unsafe HTML).
+    cls = r["quality"].lower() if r["quality"] in _QUALITY_ORDER else "fair"
+    mentee_id = html.escape(str(r["mentee_id"]))
+    mentor_id = html.escape(str(r["mentor_id"]))
+    quality = html.escape(str(r["quality"]))
     header = (
-        f'<h4>Mentee {r["mentee_id"]} {_country_token(r["mentee_country"])} {_field_label(r["mentee_field"])}'
-        f' → Mentor {r["mentor_id"]} {_country_token(r["mentor_country"])} {_field_label(r["mentor_field"])}</h4>'
-        f'<p><span class="percentage-badge {r["quality"].lower()}">{r["score"]}% - {r["quality"]}</span>'
+        f'<h4>Mentee {mentee_id} {_country_token(r["mentee_country"])} {_field_label(r["mentee_field"])}'
+        f' → Mentor {mentor_id} {_country_token(r["mentor_country"])} {_field_label(r["mentor_field"])}</h4>'
+        f'<p><span class="percentage-badge {cls}">{int(r["score"])}% - {quality}</span>'
         f'{" 🚩" if r["flagged"] else ""}</p>'
     )
     with st.container(border=True):
