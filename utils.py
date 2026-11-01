@@ -93,9 +93,6 @@ def validate_uploaded_file(df, file_type):
     
     return errors, warnings, completeness
 
-def estimate_tokens(text: str) -> int:
-    """Rough token estimate (~4 chars/token); display-only, Claude has no offline tokenizer."""
-    return -(-len(text) // 4)
 
 def fetch_available_models(api_key=None):
     """Static list of the selectable Claude models: model_id -> display info (api_key is unused)."""
