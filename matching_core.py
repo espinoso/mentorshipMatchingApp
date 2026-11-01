@@ -187,6 +187,13 @@ def _countries_by_id(df: pd.DataFrame, cols: dict) -> dict[str, str]:
     }
 
 
+# Same-country pairing is a soft priority, not a ban: a shared-country cell loses this many
+# points so the solver avoids it when a better cross-country option exists, yet a clearly
+# stronger same-country match can still win and nobody is left unmatched when it's unavoidable.
+# Tune higher to avoid same-country harder, lower to weigh it more like any other pair.
+SAME_COUNTRY_PENALTY = 40.0
+
+
 def apply_country_restrictions(
     matrix_df: pd.DataFrame,
     mentees_df: pd.DataFrame,
@@ -194,14 +201,17 @@ def apply_country_restrictions(
     avoid_same_country: bool = False,
     countries: list[str] | None = None,
 ) -> tuple[pd.DataFrame, list[dict]]:
-    """Zero mentor x mentee cells that share a country; returns (matrix copy, filtered cells).
+    """Penalize mentor x mentee cells that share a country; returns (matrix copy, penalized cells).
 
+    Same-country pairs are deprioritized by SAME_COUNTRY_PENALTY (clipped at 0), not zeroed — a
+    soft priority, so a strong same-country match can still beat a weak cross-country one and the
+    assignment never leaves a mentee unmatched just to avoid a same-country pairing.
     `countries` (restrict only within those countries) wins over `avoid_same_country`;
     an empty `countries` list is treated as "no named list" (falls back to the flag).
     With no restriction requested the matrix is returned unchanged with `[]` (checked before
     column presence, so a default call never returns a skip-marker). A missing country column
     when a restriction IS requested returns the matrix unchanged, with `[{"skipped": ...}]` as
-    the report. Filtered cells are listed only when their original score was > 0.
+    the report. Penalized cells are listed only when their original score was > 0.
     """
     out = matrix_df.copy()
     named = {c.strip().lower() for c in countries} or None if countries else None
@@ -228,8 +238,10 @@ def apply_country_restrictions(
             if mentee_c.get(str(mentee_id), "") != mc:
                 continue
             score = out.loc[mentor_id, mentee_id]
-            out.loc[mentor_id, mentee_id] = 0
-            if pd.notna(score) and score > 0:
+            if pd.isna(score):
+                continue
+            out.loc[mentor_id, mentee_id] = max(0.0, float(score) - SAME_COUNTRY_PENALTY)
+            if score > 0:
                 filtered.append(
                     {
                         "mentor_id": str(mentor_id),
