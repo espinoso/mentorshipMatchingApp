@@ -23,6 +23,7 @@ from shared_utils import (
     generate_output_filename,
     merge_skill_sources,
     read_input_sheet,
+    sanitize_spreadsheet_df,
     setup_claude,
     validate_required_columns,
     write_error_log,
@@ -350,7 +351,7 @@ def process_mentee_file(input_file: str, output_file: str = None, dry_run: bool 
     # Save to output file (unless dry-run)
     if not dry_run:
         print("\n9. Saving output file...")
-        df_output.to_excel(output_file, index=False)
+        sanitize_spreadsheet_df(df_output).to_excel(output_file, index=False)
         print(f"   ✓ Output saved to: {output_file}")
     else:
         print("\n9. DRY-RUN MODE: Skipping file write")

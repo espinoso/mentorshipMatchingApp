@@ -739,9 +739,10 @@ def normalize_languages(languages: str, log_unmapped: list[str] = None) -> str:
     if pd.isna(languages) or not str(languages).strip():
         return "N/A"
     
-    original = str(languages).strip()
+    # Cap length before any regex so an attacker-sized cell can't drive super-linear backtracking (CWE-1333).
+    original = str(languages).strip()[:500]
     normalized = original
-    
+
     # Step 1: Remove accents
     normalized = remove_accents(normalized)
     
@@ -762,17 +763,11 @@ def normalize_languages(languages: str, log_unmapped: list[str] = None) -> str:
         if match:
             normalized = match.group(1)
     
-    # Step 4b: Remove phrases like "also I know", "don't feel confident", etc.
+    # Step 4b: Remove phrases like "but I don't feel confident", "currently learning ...", etc.
+    # [^.] (rather than several greedy .*) keeps each strip within one clause and avoids super-linear backtracking.
     normalized = re.sub(r'\s*also\s+I\s+know\s+', ', ', normalized, flags=re.IGNORECASE)
-    normalized = re.sub(r'\s*but\s+I\s+don.*', '', normalized, flags=re.IGNORECASE)
-    normalized = re.sub(r'\s*but\s+I.*feel.*confident.*', '', normalized, flags=re.IGNORECASE)
-    normalized = re.sub(r'\s*currently\s+learning\s+[^,)]*', '', normalized, flags=re.IGNORECASE)
-    normalized = re.sub(r'\s*after\s+[^,)]*', '', normalized, flags=re.IGNORECASE)
-    
-    # Step 4b: Remove phrases like "also I know", "don't feel confident", etc.
-    normalized = re.sub(r'\s*also\s+I\s+know\s+', ', ', normalized, flags=re.IGNORECASE)
-    normalized = re.sub(r'\s*but\s+I\s+don.*', '', normalized, flags=re.IGNORECASE)
-    normalized = re.sub(r'\s*but\s+I.*feel.*confident.*', '', normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r'\s*but\s+I\s+don[^.]*', '', normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r'\s*but\s+I[^.]*feel[^.]*confident[^.]*', '', normalized, flags=re.IGNORECASE)
     normalized = re.sub(r'\s*currently\s+learning\s+[^,)]*', '', normalized, flags=re.IGNORECASE)
     normalized = re.sub(r'\s*after\s+[^,)]*', '', normalized, flags=re.IGNORECASE)
     
