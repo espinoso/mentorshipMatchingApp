@@ -31,8 +31,9 @@ def create_heatmap(matrix_df, assignments=None, mentee_fields=None, mentor_field
     col_field = [str(mentee_fields.get(str(c), '')) if mentee_fields else '' for c in df.columns]
     customdata = [[[rf, cf] for cf in col_field] for rf in row_field]
 
+    # Ids as strings so both axes are categorical — a mixed str/int pair makes plotly tile the grid wrong.
     fig = go.Figure(data=go.Heatmap(
-        z=df.values, x=list(df.columns), y=list(df.index),
+        z=df.values, x=[str(c) for c in df.columns], y=[str(i) for i in df.index],
         colorscale='RdYlGn', zmin=0, zmax=100,
         colorbar={'title': "Match %"},
         customdata=customdata,
@@ -60,8 +61,8 @@ def create_heatmap(matrix_df, assignments=None, mentee_fields=None, mentor_field
         title="Compatibility — grouped by field · blue = chosen match · hover for detail",
         xaxis_title="Mentees", yaxis_title="Mentors",
         height=max(560, len(df) * 13),
-        xaxis={'tickangle': -45, 'showticklabels': len(df.columns) <= 80},
-        yaxis={'showticklabels': len(df) <= 80},
+        xaxis={'type': 'category', 'tickangle': -45, 'showticklabels': len(df.columns) <= 80},
+        yaxis={'type': 'category', 'showticklabels': len(df) <= 80},
         font={'size': 9},
     )
     return fig
