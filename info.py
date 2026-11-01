@@ -40,12 +40,6 @@ MENTEE_COLUMNS = {
 
 DEFAULT_MODEL = "claude-opus-5-5"
 
-# Matrix scoring: small mentor batches scored CONCURRENTLY. Small batches keep each call fast
-# and well under the output-token cap; the workers supply the speed. This is the config the
-# full-cohort benchmark validated (86x109 in ~5 min vs 30+ min sequential).
-MATRIX_BATCH_SIZE = 8
-MATRIX_MAX_WORKERS = 6
-
 
 # =====================================================================
 # API PRICING

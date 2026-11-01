@@ -90,25 +90,6 @@ def validate_uploaded_file(df, file_type):
     return errors, warnings, completeness
 
 
-def estimate_output_tokens(num_mentors: int, num_mentees: int) -> int:
-    """
-    Estimate output tokens for compatibility matrix.
-    
-    Based on actual API usage: 9,458 tokens for 15 mentors × 62 mentees.
-    That's approximately 10 tokens per mentee-mentor pair (9,458 / 930 = 10.17).
-    
-    Args:
-        num_mentors: Number of mentors in batch
-        num_mentees: Number of mentees
-    
-    Returns:
-        Estimated output tokens
-    """
-    # Base formula: 10 tokens per mentee-mentor pair
-    # Based on actual usage: 9,458 / (15 × 62) = 10.17 tokens per pair
-    return 10 * num_mentees * num_mentors
-
-
 def normalize_column_names(df):
     """
     Strip whitespace from column names to handle files with trailing spaces.

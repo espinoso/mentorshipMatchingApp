@@ -9,16 +9,11 @@ from info import (
     MENTOR_COLUMNS,
 )
 from llm_client import ClaudeClient, LLMError, parse_json
-from prompts import create_default_prompt, get_prompt_for_api
 from ui import CSS_STYLES
 from ui_matches import render_matches_tab
 from ui_processing import render_processing_tab, render_review_tab
 from ui_upload import render_entity_step
-from utils import (
-    estimate_output_tokens,
-    is_debug_mode,
-)
-from validation import prepare_data_for_assistant
+from utils import is_debug_mode
 
 st.set_page_config(
     page_title="Mentorship Matching System",
@@ -30,7 +25,6 @@ st.set_page_config(
 st.markdown(CSS_STYLES, unsafe_allow_html=True)
 
 
-MATRIX_MODEL = DEFAULT_MODEL  # the model is fixed in code (no user-facing selector)
 REASONING_MODEL = DEFAULT_MODEL
 # Opus's adaptive thinking is spent BEFORE the JSON and counts against max_tokens, so
 # every budget must leave generous room for it on top of the expected output — otherwise
@@ -107,28 +101,6 @@ def generate_matrix_jev(mentees_df, mentors_df):
             "as 0 (poor match). Matches may be degraded — re-run for a clean matrix if they look off."
         )
     return matrix
-
-
-def _score_mentor_batch(mentees_df, mentor_batch_df, api_key=None, model=None) -> str:
-    """Score one mentor batch against all mentees with Claude; return the raw JSON text.
-
-    The system prompt (scoring rubric + every mentee) is byte-identical across batches, so
-    prompt caching hits; only the user prompt (this batch's mentors) varies. max_tokens is
-    budgeted from the expected output so the JSON isn't truncated. Raises LLMError when the
-    response is cut off, so the caller marks the batch an error instead of filling 30s.
-
-    api_key/model are resolved by the caller when this runs on a worker thread (st.secrets and
-    st.session_state aren't thread-safe); they default to the normal lookups for direct callers.
-    """
-    system = f"{get_prompt_for_api()}\n\n{prepare_data_for_assistant(mentees_df, None)}"
-    user = (
-        f"{prepare_data_for_assistant(None, mentor_batch_df)}\n\n"
-        "Generate matches for ALL mentees in JSON format as specified."
-    )
-    budget = int(estimate_output_tokens(len(mentor_batch_df), len(mentees_df)) * 1.5) + THINKING_HEADROOM
-    budget = max(THINKING_HEADROOM, min(budget, MATRIX_MAX_OUTPUT_TOKENS))
-    client = ClaudeClient(model or _model_choice(MATRIX_MODEL), api_key or _anthropic_key())
-    return client.complete_json(system, user, max_tokens=budget, cache_system=True)
 
 
 def reasoning_for_pair(mentee_id, mentor_id, score, mentees_df, mentors_df):
@@ -421,8 +393,6 @@ def main():
         st.session_state.matrix_df = None
     if 'assignments' not in st.session_state:
         st.session_state.assignments = None
-    if 'custom_prompt' not in st.session_state:
-        st.session_state.custom_prompt = create_default_prompt()
     if 'max_mentees_per_mentor' not in st.session_state:
         st.session_state.max_mentees_per_mentor = 2
     if 'country_restrictions' not in st.session_state:

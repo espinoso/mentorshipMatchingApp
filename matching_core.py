@@ -1,6 +1,5 @@
 """Headless matching logic: no Streamlit, no I/O. Callers decide how to display a report."""
 
-import json
 import re
 from dataclasses import dataclass, field
 
@@ -11,100 +10,6 @@ from scipy.optimize import linear_sum_assignment
 from info import MENTEE_COLUMNS, MENTOR_COLUMNS
 
 MISSING_MENTEE_SCORE = 30  # AI omitted the pair: assume a poor match
-
-
-@dataclass
-class MatrixParseReport:
-    """Outcome of parsing one batch's matrix response; `df` is None when unusable."""
-
-    df: pd.DataFrame | None = None
-    wrong_mentors: list[str] = field(default_factory=list)
-    wrong_mentees: list[str] = field(default_factory=list)
-    missing_mentors: list[str] = field(default_factory=list)
-    missing_mentees_filled: list[str] = field(default_factory=list)
-    completion_rate: float = 0.0  # percent of expected mentor x mentee scores received
-    error: str | None = None
-    notes: list[str] = field(default_factory=list)  # non-fatal observations
-    raw_excerpt: str = ""  # first 2000 chars of the cleaned response, for debugging
-
-
-def _as_text(response_text: object) -> str:
-    """Unwrap SDK objects that carry the text under `.text` (possibly nested)."""
-    if isinstance(response_text, str):
-        return response_text
-    text_obj = getattr(response_text, "text", response_text)
-    return str(getattr(text_obj, "text", text_obj))
-
-
-def parse_matrix_response(
-    response_text: object, expected_mentors: list, expected_mentees: list
-) -> MatrixParseReport:
-    """Parse the model's matrix JSON and validate it against the requested batch IDs."""
-    report = MatrixParseReport()
-    text = _as_text(response_text).strip()
-    report.raw_excerpt = text[:2000]
-
-    # A repr of a config object means a reasoning model returned no JSON content.
-    if "ResponseTextConfig" in text or "ResponseFormatText" in text:
-        report.error = "Received a configuration object instead of JSON content"
-        return report
-
-    text = text.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
-    first, last = text.find("{"), text.rfind("}")
-    if first == -1 or first >= last:
-        report.error = "Could not find JSON object boundaries in response"
-        return report
-    before, after = text[:first].strip(), text[last + 1 :].strip()
-    if before or after:
-        report.notes.append(
-            f"Model added text around the JSON (before: {before[:500]!r}, after: {after[:500]!r})"
-        )
-    text = text[first : last + 1]
-
-    mentor_set = {str(x) for x in expected_mentors}
-    mentee_set = {str(x) for x in expected_mentees}
-    matrix: dict[str, dict[str, object]] = {}
-    seen_mentees: set[str] = set()
-    try:
-        data = json.loads(text)
-        if "matrix" not in data:
-            raise ValueError("Response should contain 'matrix' key")
-        if not isinstance(data["matrix"], list):
-            raise TypeError("Matrix should be a list")
-        for entry in data["matrix"]:
-            mentor_id = str(entry["mentor_id"])
-            if mentor_id not in mentor_set:
-                report.wrong_mentors.append(mentor_id)
-                continue
-            scores = {}
-            for score in entry["scores"]:
-                mentee_id = str(score["mentee_id"])
-                if mentee_id not in mentee_set:
-                    if mentee_id not in report.wrong_mentees:
-                        report.wrong_mentees.append(mentee_id)
-                    continue
-                scores[mentee_id] = score["percentage"]
-                seen_mentees.add(mentee_id)
-            if scores:
-                matrix[mentor_id] = scores
-    except (json.JSONDecodeError, ValueError, KeyError, TypeError) as e:
-        report.error = f"Error parsing matrix response: {e!s}"
-        return report
-
-    expected_total = len(expected_mentors) * len(expected_mentees)
-    actual_total = sum(len(s) for s in matrix.values())
-    report.completion_rate = actual_total / expected_total * 100 if expected_total else 0.0
-    report.missing_mentors = sorted(mentor_set - set(matrix))
-    if not matrix:
-        report.error = "No valid mentor data after filtering"
-        return report
-
-    df = pd.DataFrame(matrix).T
-    report.missing_mentees_filled = [str(m) for m in expected_mentees if str(m) not in df.columns]
-    for mentee in report.missing_mentees_filled:
-        df[mentee] = MISSING_MENTEE_SCORE
-    report.df = df[[str(m) for m in sorted(expected_mentees)]]
-    return report
 
 
 @dataclass
