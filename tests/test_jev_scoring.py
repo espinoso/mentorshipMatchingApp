@@ -76,15 +76,16 @@ def test_profile_includes_goals_needs_and_seniority():
 
 
 def test_assembles_full_matrix_and_rescales_top():
-    m = score_matrix_jev(_ee(), _mo(), "k", client=FakeClient(score=4.0))
+    m, unscored = score_matrix_jev(_ee(), _mo(), "k", client=FakeClient(score=4.0))
     assert sorted(m.index) == ["10", "11"]
     assert sorted(m.columns) == ["1", "2"]
     assert (m == 100).all().all()  # score 4 of top 4 -> 100
+    assert unscored == 0
 
 
 @pytest.mark.parametrize("score,pct", [(2.0, 50), (0.83, 21), (0.0, 0)])
 def test_rescale(score, pct):
-    m = score_matrix_jev(_ee(), _mo(), "k", client=FakeClient(score=score))
+    m, _ = score_matrix_jev(_ee(), _mo(), "k", client=FakeClient(score=score))
     assert (m == pct).all().all()
 
 
@@ -92,9 +93,10 @@ def test_partial_failure_filled_zero_not_raised():
     # Fail every pair whose MENTOR half is CS (mentor 11); the rest still score.
     def fail(s):
         return "CS" in s.split("MENTOR:")[-1]
-    m = score_matrix_jev(_ee(), _mo(), "k", client=FakeClient(score=4.0, fail_fn=fail))
+    m, unscored = score_matrix_jev(_ee(), _mo(), "k", client=FakeClient(score=4.0, fail_fn=fail))
     assert m.loc["11", "1"] == 0 and m.loc["11", "2"] == 0  # failed mentor -> 0
     assert m.loc["10", "1"] == 100 and m.loc["10", "2"] == 100  # others scored
+    assert unscored == 2  # the two failed pairs are reported, not hidden
 
 
 def test_total_failure_raises():
