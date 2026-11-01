@@ -5,3 +5,4 @@ openpyxl==3.1.5
 anthropic==2.3.0
 scipy==1.18.1
 plotly==7.1.0
+typesafe-sdk==0.7.5

@@ -179,15 +179,12 @@ def render_processing_tab():
                 """, unsafe_allow_html=True)
             
             # Import API functions from app.py (will be moved to api_client.py later)
-            from app import generate_matrix_in_batches, get_reasoning_for_assignments
-            
-            # Use auto-calculated batch size (will be calculated if not already set)
-            batch_size = st.session_state.get('batch_size', None)
-            
-            matrix_df = generate_matrix_in_batches(
+            from app import generate_matrix_jev, get_reasoning_for_assignments
+
+            # Score the compatibility matrix with Jev (System One); assignment + reasoning follow.
+            matrix_df = generate_matrix_jev(
                 st.session_state.mentees_df,
                 st.session_state.mentors_df,
-                batch_size=batch_size,  # None = auto-calculate
             )
             
             if matrix_df is not None:

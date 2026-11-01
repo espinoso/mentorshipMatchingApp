@@ -157,6 +157,54 @@ def _anthropic_key() -> str:
         return ""
 
 
+def _typesafe_key() -> str:
+    """TypeSafe/Jev API key from the environment, then Streamlit secrets (TYPESAFE_API_KEY or JEV_API_KEY)."""
+    key = os.environ.get("TYPESAFE_API_KEY")
+    if key:
+        return key
+    try:
+        return st.secrets["TYPESAFE_API_KEY"]
+    except Exception:
+        pass
+    try:
+        return st.secrets["JEV_API_KEY"]
+    except Exception:
+        return ""
+
+
+def generate_matrix_jev(mentees_df, mentors_df):
+    """Score the compatibility matrix with Jev (TypeSafe System One), with a live progress bar.
+
+    Returns the mentors×mentees matrix DataFrame, or None (after an st.error) if the key is
+    missing or Jev fails — so the caller skips assignment instead of matching on a broken matrix.
+    """
+    from jev_scoring import JevError, score_matrix_jev
+
+    key = _typesafe_key()
+    if not key:
+        st.error("❌ No Jev API key. Add TYPESAFE_API_KEY (or JEV_API_KEY) to your secrets.")
+        return None
+
+    total = len(mentees_df) * len(mentors_df)
+    bar = st.progress(0.0, text=f"Scoring {total} mentee×mentor pairs with Jev…")
+    seen = {"frac": 0.0}
+
+    def on_progress(done, total_pairs):
+        frac = done / total_pairs
+        if frac - seen["frac"] >= 0.02 or done == total_pairs:  # throttle st reruns to ~50 updates
+            seen["frac"] = frac
+            bar.progress(frac, text=f"Scoring with Jev… {done}/{total_pairs} pairs")
+
+    try:
+        matrix = score_matrix_jev(mentees_df, mentors_df, key, progress_cb=on_progress)
+    except JevError as e:
+        bar.empty()
+        st.error(f"❌ Jev scoring failed: {e}")
+        return None
+    bar.empty()
+    return matrix
+
+
 def _score_mentor_batch(mentees_df, mentor_batch_df, api_key=None, model=None) -> str:
     """Score one mentor batch against all mentees with Claude; return the raw JSON text.
 
@@ -621,8 +669,8 @@ def render_rail(current: int, has_data: bool, has_results: bool, clickable: bool
 
 
 def render_sidebar() -> None:
-    """Settings live here, not as wizard steps: the few knobs an organizer touches, plus an
-    Advanced section for the model and the raw scoring rubric (power users only)."""
+    """Settings live here, not as wizard steps: the few knobs an organizer touches. Scoring runs
+    on Jev (fixed rubric), so there is no model or rubric control."""
     with st.sidebar:
         st.header("⚙️ Settings")
         st.session_state.max_mentees_per_mentor = st.number_input(
@@ -639,14 +687,6 @@ def render_sidebar() -> None:
             help="Don't match Spanish mentors to Spanish mentees. Needs a country column in the data.",
         )
         st.session_state.country_restrictions = ["spain"] if restrict_spain else []
-
-        with st.expander("Advanced", expanded=False):
-            st.session_state.custom_prompt = st.text_area(
-                "Scoring rubric",
-                value=st.session_state.custom_prompt,
-                height=240,
-                help="The scoring policy sent to the model (dimensions + calibration). The default is tuned — edit only if you know what you're doing.",
-            )
 
 
 def main():
