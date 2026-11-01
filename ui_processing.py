@@ -96,9 +96,9 @@ def _render_results_header(assignments, stats, flagged):
 
 
 def get_country_flag(country_name):
-    """Convert country name to flag emoji (basic mapping for common countries)"""
+    """Country name -> flag emoji, or "" when unknown (caller shows the name, not a globe)."""
     if not country_name or pd.isna(country_name):
-        return "🌍"
+        return ""
     
     # Normalize country name: strip, lowercase, and handle common variations
     country_normalized = str(country_name).strip().lower()
@@ -134,17 +134,91 @@ def get_country_flag(country_name):
     if country_normalized in country_flags:
         return country_flags[country_normalized]
     
-    # Try partial match (e.g., "spain" in "spain country" or vice versa)
-    for country, flag in country_flags.items():
-        if country in country_normalized or country_normalized in country:
-            return flag
-    
-    # Default to globe if not found
-    return "🌍"
+    # Unknown country: no flag — the caller shows the country name instead of a meaningless globe.
+    return ""
 
-# Note: These functions will be moved to api_client.py in the next phase
-# Importing here to avoid circular dependency - they're defined in app.py
-# TODO: Move to api_client.py and update import
+
+def _country_token(country):
+    """Compact country marker for a card: flag emoji if known, else the name, else ""."""
+    if not country or pd.isna(country):
+        return ""
+    name = str(country).strip()
+    return get_country_flag(name) or name.title()
+
+
+def _field_label(field):
+    """Small grey field pill, or "" when the field is missing."""
+    if not field or str(field).strip().lower() in ("", "nan", "n/a", "none"):
+        return ""
+    return (
+        '<span style="background:#F5F5F7;padding:0.2rem 0.5rem;border-radius:4px;'
+        f'font-size:0.85rem;margin-left:0.4rem;">{field}</span>'
+    )
+
+
+def _col_val(row, col):
+    """First non-blank value of a column in a one-row frame, or None."""
+    if not row.empty and col in row.columns:
+        v = row[col].iloc[0]
+        if pd.notna(v) and str(v).strip():
+            return str(v).strip()
+    return None
+
+
+def _numeric(value):
+    """Leading integer in an id, for numeric sort; 0 if none."""
+    m = re.search(r'\d+', str(value))
+    return int(m.group()) if m else 0
+
+
+def _match_rows(matches, mentees_df, mentors_df, flagged_pairs):
+    """Flatten matches into rows carrying the fields the list filters/sorts/renders on.
+    Mentee country = affiliated-university country; mentor country = country of origin."""
+    # Match ids as strings — assignment ids are strings while the df id column may be int.
+    mentee_ids = mentees_df[MENTEE_COLUMNS['id']].astype(str)
+    mentor_ids = mentors_df[MENTOR_COLUMNS['id']].astype(str)
+    rows = []
+    for md in matches:
+        mid = md['mentee_id']
+        mrow = mentees_df[mentee_ids == str(mid)]
+        mentee_field = _col_val(mrow, MENTEE_COLUMNS['field']) or ''
+        mentee_country = _col_val(mrow, MENTEE_COLUMNS['country'])
+        for m in md['matches']:
+            tid = m['mentor_id']
+            trow = mentors_df[mentor_ids == str(tid)]
+            rows.append({
+                'mentee_id': mid, 'mentor_id': tid,
+                'score': m['match_percentage'], 'quality': m['match_quality'],
+                'mentee_field': mentee_field, 'mentor_field': _col_val(trow, MENTOR_COLUMNS['field']) or '',
+                'mentee_country': mentee_country,
+                'mentor_country': _col_val(trow, MENTOR_COLUMNS['country_of_origin']),
+                'flagged': (str(mid), str(tid)) in flagged_pairs,
+            })
+    return rows
+
+
+_QUALITY_ORDER = {'Excellent': 0, 'Strong': 1, 'Good': 2, 'Fair': 3, 'Poor': 4}
+
+
+def _render_match_card(r):
+    """One match card: header (ids, country, field) + badge + on-demand reasoning."""
+    header = (
+        f'<h4>Mentee {r["mentee_id"]} {_country_token(r["mentee_country"])} {_field_label(r["mentee_field"])}'
+        f' → Mentor {r["mentor_id"]} {_country_token(r["mentor_country"])} {_field_label(r["mentor_field"])}</h4>'
+        f'<p><span class="percentage-badge {r["quality"].lower()}">{r["score"]}% - {r["quality"]}</span>'
+        f'{" 🚩" if r["flagged"] else ""}</p>'
+    )
+    with st.container(border=True):
+        st.markdown(header, unsafe_allow_html=True)
+        cache = st.session_state.setdefault("reasoning_cache", {})
+        ck = (str(r['mentee_id']), str(r['mentor_id']))
+        if st.button("💡 Why this match?", key=f"why_{r['mentee_id']}_{r['mentor_id']}") and ck not in cache:
+            from app import reasoning_for_pair
+            with st.spinner("Asking Claude…"):
+                cache[ck] = reasoning_for_pair(r['mentee_id'], r['mentor_id'], r['score'],
+                                               st.session_state.mentees_df, st.session_state.mentors_df)
+        if ck in cache:
+            st.markdown(f"**Reasoning:** {cache[ck]}")
 
 
 def _back_to_generate():
@@ -416,112 +490,54 @@ def render_processing_tab():
         
         st.divider()
         
-        # Search box
-        search_col1, search_col2 = st.columns([3, 1])
-        with search_col1:
-            search_query = st.text_input(
-                "🔍 Search Mentees", 
-                value=st.session_state.mentee_search,
-                placeholder="Type mentee ID to filter...",
-                label_visibility="collapsed"
+        # Match list — search / sort / needs-review, then cards
+        st.subheader("Matches")
+        flagged_pairs = {
+            (str(f['mentee_id']), str(f['mentor_id']))
+            for f in (st.session_state.get('flagged_matches') or [])
+        }
+        rows = _match_rows(st.session_state.matches, st.session_state.mentees_df,
+                           st.session_state.mentors_df, flagged_pairs)
+
+        ctrl_search, ctrl_sort, ctrl_review = st.columns([3, 2, 2])
+        with ctrl_search:
+            query = st.text_input(
+                "Search matches", value=st.session_state.get('mentee_search', ''),
+                placeholder="Search by mentee/mentor ID or field…", label_visibility="collapsed",
+            ).strip().lower()
+            st.session_state.mentee_search = query
+        with ctrl_sort:
+            sort_by = st.selectbox(
+                "Sort by", ["Mentee ID", "Score: high → low", "Score: low → high", "Quality"],
+                label_visibility="collapsed",
             )
-            st.session_state.mentee_search = search_query
-        with search_col2:
-            if st.button("🔄 Clear", width='stretch'):
-                st.session_state.mentee_search = ""
-                st.rerun()
-        
-        # Filter matches based on search
-        filtered_matches = [
-            m for m in st.session_state.matches 
-            if search_query.lower() in m['mentee_id'].lower()
-        ]
-        
-        if not filtered_matches and search_query:
-            st.warning(f"No mentees found matching '{search_query}'")
+        with ctrl_review:
+            review_only = st.checkbox(
+                f"⚠️ Needs review only ({len(flagged_pairs)})",
+                value=st.session_state.get('review_only', False),
+            )
+            st.session_state.review_only = review_only
+
+        def _hit(r):
+            if not query:
+                return True
+            return query in f"{r['mentee_id']} {r['mentor_id']} {r['mentee_field']} {r['mentor_field']}".lower()
+
+        shown = [r for r in rows if _hit(r) and (not review_only or r['flagged'])]
+        if sort_by == "Score: high → low":
+            shown.sort(key=lambda r: -r['score'])
+        elif sort_by == "Score: low → high":
+            shown.sort(key=lambda r: r['score'])
+        elif sort_by == "Quality":
+            shown.sort(key=lambda r: _QUALITY_ORDER.get(r['quality'], 9))
         else:
-            st.subheader(f"All Matches ({len(filtered_matches)})")
-            
-            # Sort matches numerically by mentee_id
-            def numeric_sort_key(m):
-                mentee_id = str(m['mentee_id'])
-                match = re.search(r'\d+', mentee_id)
-                if match:
-                    return int(match.group())
-                return 0
-            
-            sorted_filtered_matches = sorted(filtered_matches, key=numeric_sort_key)
-            
-            # Display all match cards
-            for match_data in sorted_filtered_matches:
-                mentee_id = match_data['mentee_id']
-                
-                # Get mentee data
-                mentee_row = st.session_state.mentees_df[
-                    st.session_state.mentees_df[MENTEE_COLUMNS['id']] == mentee_id
-                ]
-                
-                # Safely get country - check if column exists and handle NaN
-                mentee_country = None
-                if not mentee_row.empty and MENTEE_COLUMNS['country'] in mentee_row.columns:
-                    country_val = mentee_row[MENTEE_COLUMNS['country']].iloc[0]
-                    if pd.notna(country_val) and str(country_val).strip():
-                        # Normalize: trim whitespace and lowercase for consistent matching
-                        mentee_country = str(country_val).strip().lower()
-                        # Debug: log country value if in debug mode
-                        if is_debug_mode():
-                            st.caption(f"🔍 Debug: Mentee {mentee_id} country = '{mentee_country}' (original: '{country_val}')")
-                
-                mentee_field = mentee_row[MENTEE_COLUMNS['field']].iloc[0] if not mentee_row.empty else None
-                mentee_flag = get_country_flag(mentee_country)
-                
-                for match in match_data['matches']:
-                    mentor_id = match['mentor_id']
-                    quality_class = match['match_quality'].lower()
-                    
-                    # Get mentor data
-                    mentor_row = st.session_state.mentors_df[
-                        st.session_state.mentors_df[MENTOR_COLUMNS['id']] == mentor_id
-                    ]
-                    
-                    # Safely get country - check if column exists and handle NaN
-                    mentor_country = None
-                    if not mentor_row.empty and MENTOR_COLUMNS['country'] in mentor_row.columns:
-                        country_val = mentor_row[MENTOR_COLUMNS['country']].iloc[0]
-                        if pd.notna(country_val) and str(country_val).strip():
-                            # Normalize: trim whitespace and lowercase for consistent matching
-                            mentor_country = str(country_val).strip().lower()
-                            # Debug: log country value if in debug mode
-                            if is_debug_mode():
-                                st.caption(f"🔍 Debug: Mentor {mentor_id} country = '{mentor_country}' (original: '{country_val}')")
-                    
-                    mentor_field = mentor_row[MENTOR_COLUMNS['field']].iloc[0] if not mentor_row.empty else None
-                    mentor_flag = get_country_flag(mentor_country)
-                    
-                    # Build field labels
-                    mentee_field_label = f'<span style="background: #F5F5F7; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.85rem; margin-left: 0.5rem;">{mentee_field or "N/A"}</span>' if mentee_field else ''
-                    mentor_field_label = f'<span style="background: #F5F5F7; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.85rem; margin-left: 0.5rem;">{mentor_field or "N/A"}</span>' if mentor_field else ''
-                    
-                    with st.container(border=True):
-                        st.markdown(
-                            f'<h4>Mentee {mentee_id} {mentee_flag} {mentee_field_label} → '
-                            f'Mentor {mentor_id} {mentor_flag} {mentor_field_label}</h4>'
-                            f'<p><span class="percentage-badge {quality_class}">'
-                            f'{match["match_percentage"]}% - {match["match_quality"]}</span></p>',
-                            unsafe_allow_html=True,
-                        )
-                        # Reasoning is fetched on demand and cached, so we only pay for matches opened.
-                        cache = st.session_state.setdefault("reasoning_cache", {})
-                        ck = (str(mentee_id), str(mentor_id))
-                        if st.button("💡 Why this match?", key=f"why_{mentee_id}_{mentor_id}") and ck not in cache:
-                            from app import reasoning_for_pair
-                            with st.spinner("Asking Claude…"):
-                                cache[ck] = reasoning_for_pair(
-                                    mentee_id, mentor_id, match['match_percentage'],
-                                    st.session_state.mentees_df, st.session_state.mentors_df,
-                                )
-                        if ck in cache:
-                            st.markdown(f"**Reasoning:** {cache[ck]}")
+            shown.sort(key=lambda r: _numeric(r['mentee_id']))
+
+        st.caption(f"Showing {len(shown)} of {len(rows)} matches")
+        if not shown:
+            st.info("No matches for these filters.")
+        for r in shown:
+            _render_match_card(r)
     else:
         # Show waiting message if no matches yet
         st.info("👆 Click 'Generate Matches' in the Generate step to start the matching process.")
