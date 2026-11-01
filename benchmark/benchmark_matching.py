@@ -79,18 +79,43 @@ def normalized_cohort():
     return ee, mo
 
 
-def score_matrix(ee, mo):
-    """OUR compatibility matrix. THE SWAP POINT: replace this body to benchmark a different
-    scorer (Jev, embeddings, ...). Here it mirrors the app engine: small mentor batches scored
-    concurrently with Claude, then assembled."""
-    cached = os.path.join(CACHE, f"our_matrix_{MODEL}.csv")
-    if not FRESH and os.path.exists(cached):
-        print("reloading cached our-matrix", flush=True)
-        m = pd.read_csv(cached, index_col=0)
-        m.columns = [str(c) for c in m.columns]
-        m.index = [str(i) for i in m.index]
-        return m
+# The 0-N rubric Jev scores a pair against (low->high). Mirrors the app's calibration bands;
+# Jev returns a probability-weighted mean in [0, N-1], which we rescale to 0-100.
+JEV_CRITERIA = [
+    "No meaningful alignment: different field, no shared specialization or skills.",
+    "Weak: an adjacent field or a few shared skills, little depth overlap.",
+    "Moderate: a related field with some shared specialization or skills.",
+    "Strong: the same field with clear specialization or skills overlap.",
+    "Excellent: same field, closely matched specialization, comparable level, strong skills overlap.",
+]
 
+
+def _profile(row, cols):
+    """Compact text profile of a mentee/mentor for the Jev state."""
+    parts = []
+    for k in ("field", "specialization", "education_level", "affiliation", "country", "skills"):
+        c = cols.get(k)
+        if c and c in row and str(row[c]).strip() and str(row[c]).strip().lower() not in ("nan", "n/a"):
+            parts.append(f"  {k}: {str(row[c]).strip()[:300]}")
+    return "\n".join(parts)
+
+
+def _ensure_jev_key():
+    """The Jev SDK reads TYPESAFE_API_KEY; fall back to JEV_API_KEY/TYPESAFE_API_KEY in secrets.toml."""
+    if os.environ.get("TYPESAFE_API_KEY"):
+        return
+    secrets = os.path.join(REPO, ".streamlit", "secrets.toml")
+    if os.path.exists(secrets):
+        with open(secrets) as f:
+            for line in f:
+                s = line.strip()
+                if s.startswith(("JEV_API_KEY", "TYPESAFE_API_KEY")):
+                    os.environ["TYPESAFE_API_KEY"] = s.split("=", 1)[1].strip().strip('"').strip("'")
+                    return
+
+
+def _score_claude(ee, mo):
+    """The app engine's scorer: small mentor batches scored concurrently with Claude, assembled."""
     app._model_choice = lambda default=MODEL: MODEL  # pin the model for this run
     mentor_ids = [str(x) for x in mo[MID].tolist()]
     mentee_ids = [str(x) for x in ee[EID].tolist()]
@@ -110,21 +135,80 @@ def score_matrix(ee, mo):
     t0 = time.time()
     with ThreadPoolExecutor(max_workers=MATRIX_MAX_WORKERS) as ex:
         frames = [df for df in ex.map(run_batch, batches) if df is not None]
-    print(f"  scored {len(frames)}/{len(batches)} batches "
+    print(f"  Claude scored {len(frames)}/{len(batches)} batches "
           f"({MATRIX_BATCH_SIZE} mentors each, {MATRIX_MAX_WORKERS} workers) in {time.time()-t0:.0f}s", flush=True)
     if not frames:
         sys.exit("SCORING FAILED: no batch succeeded")
     full = pd.concat(frames)
     cols = [c for c in sorted(mentee_ids, key=lambda x: int(x) if x.isdigit() else 999) if c in full.columns]
-    full = full[cols]
-    full.to_csv(cached)
-    full.columns = [str(c) for c in full.columns]
-    full.index = [str(i) for i in full.index]
-    return full
+    return full[cols]
+
+
+def _score_jev(ee, mo):
+    """Jev System One scorer: one calibrated Score call per mentee×mentor pair, concurrently.
+    Score is a probability-weighted mean over JEV_CRITERIA (0..N-1), rescaled to 0-100."""
+    from typesafe_sdk import Score, TypeSafeClient
+
+    _ensure_jev_key()
+    workers = int(os.environ.get("JEV_WORKERS", "16"))
+    top = len(JEV_CRITERIA) - 1
+    mentor_ids = [str(x) for x in mo[MID].tolist()]
+    mentee_ids = [str(x) for x in ee[EID].tolist()]
+    ee_prof = {str(r[EID]): _profile(r, MENTEE_COLUMNS) for _, r in ee.iterrows()}
+    mo_prof = {str(r[MID]): _profile(r, MENTOR_COLUMNS) for _, r in mo.iterrows()}
+    pairs = [(e, m) for m in mentor_ids for e in mentee_ids]
+    grid = {m: {} for m in mentor_ids}
+
+    with TypeSafeClient(model="jev-latest") as client:
+        def one(pair):
+            e, m = pair
+            state = f"MENTEE:\n{ee_prof[e]}\n\nMENTOR:\n{mo_prof[m]}"
+            for _ in range(3):
+                try:
+                    resp = client.system_one(state=state, questions={"match": Score(
+                        instructions="How strong is this mentor-mentee match for a mentorship program?",
+                        criteria=JEV_CRITERIA)})
+                    return e, m, round(resp.scores["match"].score / top * 100)
+                except Exception:  # noqa: BLE001 - benchmark: retry any transient Jev error
+                    time.sleep(1)
+            return e, m, None
+
+        t0 = time.time()
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            for e, m, pct in ex.map(one, pairs):
+                if pct is not None:
+                    grid[m][e] = pct
+    scored = sum(len(v) for v in grid.values())
+    print(f"  Jev scored {scored}/{len(pairs)} pairs ({workers} workers) in {time.time()-t0:.0f}s", flush=True)
+    full = pd.DataFrame.from_dict(grid, orient="index")
+    cols = [c for c in mentee_ids if c in full.columns]
+    missing = full[cols].isna().sum().sum()
+    if missing:
+        print(f"  WARNING: {missing} pairs unscored after retries, filled 0", flush=True)
+    return full[cols].fillna(0)
+
+
+def score_matrix(ee, mo):
+    """OUR compatibility matrix (mentors×mentees, 0-100). THE SWAP POINT: pick the scorer with
+    BENCH_SCORER=claude|jev; add a branch to benchmark another. Result is cached per scorer."""
+    scorer = os.environ.get("BENCH_SCORER", "claude")
+    tag = MODEL if scorer == "claude" else scorer
+    cached = os.path.join(CACHE, f"our_matrix_{tag}.csv")
+    if not FRESH and os.path.exists(cached):
+        print(f"reloading cached our-matrix ({scorer})", flush=True)
+        m = pd.read_csv(cached, index_col=0)
+    else:
+        m = _score_jev(ee, mo) if scorer == "jev" else _score_claude(ee, mo)
+        m.to_csv(cached)
+    m.columns = [str(c) for c in m.columns]
+    m.index = [str(i) for i in m.index]
+    return m
 
 
 def main():
-    print(f"cohort from {os.path.basename(MENTEE_SURVEY)} + {os.path.basename(MENTOR_SURVEY)} | model={MODEL}", flush=True)
+    scorer = os.environ.get("BENCH_SCORER", "claude")
+    print(f"cohort from {os.path.basename(MENTEE_SURVEY)} + {os.path.basename(MENTOR_SURVEY)} | "
+          f"scorer={scorer}{'/' + MODEL if scorer == 'claude' else ''}", flush=True)
     ee, mo = normalized_cohort()
     print(f"mentees={len(ee)} mentors={len(mo)}", flush=True)
 

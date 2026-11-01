@@ -26,11 +26,24 @@ so reruns are instant. Pass `BENCH_FRESH=1` to recompute.
 - **Same-field misses** — the regression signal: mentees the original placed with a same-field
   mentor that we did not. Investigate these before claiming parity.
 
-## Swapping the scorer (e.g. Jev / embeddings)
+## Swapping the scorer (Claude / Jev / …)
 
-`score_matrix(ee, mo)` in `benchmark_matching.py` is the only expensive, swappable part. Replace its
-body with your scorer (return a mentors×mentees DataFrame of 0–100 scores); the grading is unchanged,
-so you get an apples-to-apples comparison against the original and against the current pipeline.
+`score_matrix(ee, mo)` is the only expensive, swappable part — it dispatches on `BENCH_SCORER`:
+
+```bash
+BENCH_SCORER=claude .venv/bin/python benchmark/benchmark_matching.py   # default: the app engine
+BENCH_SCORER=jev    .venv/bin/python benchmark/benchmark_matching.py   # TypeSafe Jev (needs typesafe-sdk + a key)
+```
+
+Each scorer returns a mentors×mentees DataFrame of 0–100 scores and is cached separately, so the
+grading is identical and the comparison is apples-to-apples. Add a branch to `score_matrix` (and a
+`_score_<name>` function) to benchmark another.
+
+**Jev** (`_score_jev`) scores each pair with the Score primitive against `JEV_CRITERIA` (a 0–N rubric,
+rescaled to 0–100). It needs `pip install typesafe-sdk` (benchmark-only; not an app dependency) and a
+key in `TYPESAFE_API_KEY` env or `JEV_API_KEY`/`TYPESAFE_API_KEY` in `.streamlit/secrets.toml`. Full
+86×109 is ~9,400 calls, a few minutes, roughly $0.20. Note: this sends the (normalized, de-identified)
+cohort profiles to typesafe.ai.
 
 ## Data
 
