@@ -53,3 +53,22 @@ def test_malformed_response_returns_empty(run, response):
 
 def test_llm_error_returns_empty(run):
     assert run(_Fake(error=LLMError("boom"))) == {}
+
+
+def test_reasoning_for_pair_returns_text_and_runs_quiet(monkeypatch):
+    seen = {}
+
+    def fake(assignments, ee, mo, *, quiet=False):
+        seen["quiet"], seen["assignments"] = quiet, assignments
+        return {("1", "2"): "Because the fields align."}
+
+    monkeypatch.setattr(app, "get_reasoning_for_assignments", fake)
+    assert app.reasoning_for_pair("1", "2", 90, None, None) == "Because the fields align."
+    assert seen["quiet"] is True  # single-pair lookups don't emit toasts
+    assert seen["assignments"] == [("1", "2", 90)]
+
+
+def test_reasoning_for_pair_falls_back_when_unavailable(monkeypatch):
+    monkeypatch.setattr(app, "get_reasoning_for_assignments", lambda *a, **k: {})
+    out = app.reasoning_for_pair("1", "2", 73, None, None)
+    assert "73%" in out
