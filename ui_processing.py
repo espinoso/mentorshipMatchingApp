@@ -106,12 +106,14 @@ def get_country_flag(country_name):
     
     # Handle common country name variations (e.g., "España" -> "Spain")
     country_variations = {
-        'españa': 'spain', 'espana': 'spain',  # Spanish name variations
-        'portugal': 'portugal',  # Already in English
+        'españa': 'spain', 'espana': 'spain',
         'reino unido': 'united kingdom', 'reino unido de gran bretaña': 'united kingdom',
         'estados unidos': 'united states', 'ee.uu.': 'united states', 'eeuu': 'united states',
-        'méxico': 'mexico', 'mexico': 'mexico',
-        'brasil': 'brazil',
+        'méxico': 'mexico', 'brasil': 'brazil', 'irán': 'iran',
+        'países bajos': 'netherlands', 'paises bajos': 'netherlands', 'holanda': 'netherlands',
+        'alemania': 'germany', 'francia': 'france', 'italia': 'italy', 'reino unido ': 'united kingdom',
+        'emiratos árabes unidos': 'united arab emirates', 'arabia saudí': 'saudi arabia',
+        'corea del sur': 'south korea', 'sudáfrica': 'south africa',
     }
     
     # Check if it's a known variation first
@@ -128,7 +130,17 @@ def get_country_flag(country_name):
         'colombia': '🇨🇴', 'peru': '🇵🇪', 'venezuela': '🇻🇪', 'ecuador': '🇪🇨', 'uruguay': '🇺🇾',
         'japan': '🇯🇵', 'china': '🇨🇳', 'india': '🇮🇳', 'south korea': '🇰🇷', 'australia': '🇦🇺',
         'new zealand': '🇳🇿', 'south africa': '🇿🇦', 'egypt': '🇪🇬', 'turkey': '🇹🇷', 'israel': '🇮🇱',
-        'russia': '🇷🇺', 'ukraine': '🇺🇦', 'czech republic': '🇨🇿', 'hungary': '🇭🇺', 'romania': '🇷🇴'
+        'russia': '🇷🇺', 'ukraine': '🇺🇦', 'czech republic': '🇨🇿', 'hungary': '🇭🇺', 'romania': '🇷🇴',
+        'iran': '🇮🇷', 'sri lanka': '🇱🇰', 'pakistan': '🇵🇰', 'bangladesh': '🇧🇩', 'indonesia': '🇮🇩',
+        'vietnam': '🇻🇳', 'thailand': '🇹🇭', 'philippines': '🇵🇭', 'taiwan': '🇹🇼', 'singapore': '🇸🇬',
+        'malaysia': '🇲🇾', 'hong kong': '🇭🇰', 'nigeria': '🇳🇬', 'kenya': '🇰🇪', 'ghana': '🇬🇭',
+        'morocco': '🇲🇦', 'tunisia': '🇹🇳', 'algeria': '🇩🇿', 'lebanon': '🇱🇧', 'jordan': '🇯🇴',
+        'iraq': '🇮🇶', 'saudi arabia': '🇸🇦', 'united arab emirates': '🇦🇪', 'qatar': '🇶🇦',
+        'bolivia': '🇧🇴', 'paraguay': '🇵🇾', 'costa rica': '🇨🇷', 'panama': '🇵🇦', 'cuba': '🇨🇺',
+        'dominican republic': '🇩🇴', 'guatemala': '🇬🇹', 'el salvador': '🇸🇻', 'honduras': '🇭🇳',
+        'croatia': '🇭🇷', 'serbia': '🇷🇸', 'bulgaria': '🇧🇬', 'slovakia': '🇸🇰', 'slovenia': '🇸🇮',
+        'lithuania': '🇱🇹', 'latvia': '🇱🇻', 'estonia': '🇪🇪', 'iceland': '🇮🇸', 'luxembourg': '🇱🇺',
+        'cyprus': '🇨🇾', 'malta': '🇲🇹',
     }
     
     # Try exact match first
@@ -202,24 +214,29 @@ _QUALITY_ORDER = {'Excellent': 0, 'Strong': 1, 'Good': 2, 'Fair': 3, 'Poor': 4}
 
 
 def _match_quality(score):
-    """Quality band for a match badge (matches the pipeline's thresholds; styled classes only)."""
-    return 'Excellent' if score >= 90 else 'Strong' if score >= 75 else 'Good' if score >= 60 else 'Fair'
+    """Quality band for a match badge — same 5 bands as the distribution (Excellent≥85 … Poor<45)."""
+    return ('Excellent' if score >= 85 else 'Strong' if score >= 75
+            else 'Good' if score >= 60 else 'Fair' if score >= 45 else 'Poor')
 
 
 def _alternative_mentors(mentee_id, current_mentor_id, n=6):
-    """Top-N mentors for this mentee by matrix score, excluding the current one: (id, field, score)."""
+    """Top-N mentors for this mentee by matrix score, excluding the current one:
+    (id, field, score, current_load)."""
     matrix = st.session_state.get('matrix_df')
     if matrix is None or str(mentee_id) not in matrix.columns:
         return []
     mentors_df = st.session_state.mentors_df
     mentor_ids = mentors_df[MENTOR_COLUMNS['id']].astype(str)
+    load = {}
+    for _m, mt, _s in st.session_state.get('assignments', []):
+        load[str(mt)] = load.get(str(mt), 0) + 1
     out = []
     for mid, score in matrix[str(mentee_id)].sort_values(ascending=False).items():
         mid = str(mid)
         if mid == str(current_mentor_id):
             continue
         field = _col_val(mentors_df[mentor_ids == mid], MENTOR_COLUMNS['field']) or ''
-        out.append((mid, field, round(float(score))))
+        out.append((mid, field, round(float(score)), load.get(mid, 0)))
         if len(out) >= n:
             break
     return out
@@ -280,12 +297,15 @@ def _render_match_card(r):
             if not alts:
                 st.caption("No alternative mentors available.")
             else:
-                labels = {f"Mentor {mid} · {field or 'N/A'} · {score}%": mid for mid, field, score in alts}
+                cap = st.session_state.get('max_mentees_per_mentor', 2)
+                labels = {
+                    f"Mentor {mid} · {field or 'N/A'} · {score}% · {ld}/{cap} mentees": mid
+                    for mid, field, score, ld in alts
+                }
                 pick = st.selectbox("Alternatives (by score)", list(labels),
                                     key=f"alt_{r['mentee_id']}", label_visibility="collapsed")
                 if st.button("Use this mentor", key=f"swap_{r['mentee_id']}"):
                     new_mentor = labels[pick]
-                    cap = st.session_state.get('max_mentees_per_mentor', 2)
                     load = sum(1 for _, mt, _ in st.session_state.assignments if str(mt) == str(new_mentor))
                     _apply_override(r['mentee_id'], new_mentor)
                     if load >= cap:
