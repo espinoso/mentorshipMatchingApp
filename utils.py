@@ -109,37 +109,6 @@ def fetch_available_models(api_key=None):
         for m in CLAUDE_MODELS
     }
 
-def estimate_api_cost(prompt_tokens: int, completion_tokens: int, model: str = DEFAULT_MODEL) -> float:
-    """Estimate the cost (USD) of an API call from token usage; unknown models price as the default."""
-    if model not in API_PRICING:
-        model = DEFAULT_MODEL
-    
-    prompt_cost = (prompt_tokens / 1_000_000) * API_PRICING[model]["prompt"]
-    completion_cost = (completion_tokens / 1_000_000) * API_PRICING[model]["completion"]
-    
-    return prompt_cost + completion_cost
-
-def estimate_input_tokens_stateless(num_mentors: int, num_mentees: int, base_prompt_tokens: int = 3500) -> int:
-    """
-    Estimate input tokens for stateless mode (store=False).
-    
-    Based on actual API usage: 14,900 tokens for 15 mentors × 62 mentees.
-    Reverse-engineered: ~600 tokens per mentor, ~50 tokens per mentee, ~3,500 base.
-    
-    Args:
-        num_mentors: Number of mentors in this batch
-        num_mentees: Total number of mentees (always sent in stateless)
-        base_prompt_tokens: Base prompt overhead (instructions, rubric, etc.)
-    
-    Returns:
-        Estimated input tokens
-    """
-    # Base prompt (instructions, rubric, JSON schema, etc.) - ~3,500 tokens
-    # ~600 tokens per mentor (mentor data) - based on actual: (14,900 - 3,500 - 3,100) / 15 ≈ 600
-    # ~50 tokens per mentee (mentee data)
-    mentor_tokens = num_mentors * 600
-    mentee_tokens = num_mentees * 50
-    return base_prompt_tokens + mentor_tokens + mentee_tokens
 
 def estimate_output_tokens(num_mentors: int, num_mentees: int) -> int:
     """
@@ -159,57 +128,6 @@ def estimate_output_tokens(num_mentors: int, num_mentees: int) -> int:
     # Based on actual usage: 9,458 / (15 × 62) = 10.17 tokens per pair
     return 10 * num_mentees * num_mentors
 
-# Safe cap on estimated OUTPUT tokens per batch, with headroom under Claude's 128K output cap.
-MATRIX_OUTPUT_CAP = 100000
-
-
-def calculate_optimal_batch_size(
-    total_mentors: int,
-    num_mentees: int,
-) -> int:
-    """
-    Largest mentor batch whose estimated OUTPUT tokens stay under MATRIX_OUTPUT_CAP.
-
-    With Claude, input is no longer the constraint (huge context + prompt caching); the 128K
-    output cap is. Estimated output is ~15 tokens per mentor-mentee pair (the 10/pair of
-    estimate_output_tokens plus the 1.5x headroom the matrix call budgets with).
-
-    Args:
-        total_mentors: Total number of mentors to process
-        num_mentees: Total number of mentees
-
-    Returns:
-        Optimal batch size (number of mentors per batch)
-    """
-    if num_mentees <= 0:
-        return min(30, max(total_mentors, 1))
-
-    # Try from high to low; return the largest batch whose estimated output fits.
-    for batch_size in range(min(30, total_mentors), 0, -1):
-        if int(estimate_output_tokens(batch_size, num_mentees) * 1.5) <= MATRIX_OUTPUT_CAP:
-            return batch_size
-
-    # Even one mentor overflows the cap (enormous cohort): one mentor per batch is the floor.
-    return 1
-
-def estimate_batch_tokens(
-    num_mentors: int,
-    num_mentees: int,
-) -> tuple[int, int]:
-    """
-    Estimate input and output tokens for a batch.
-    
-    Args:
-        num_mentors: Number of mentors in this batch
-        num_mentees: Number of mentees
-    
-    Returns:
-        Tuple of (input_tokens, output_tokens)
-    """
-    input_tokens = estimate_input_tokens_stateless(num_mentors, num_mentees)
-    output_tokens = estimate_output_tokens(num_mentors, num_mentees)
-    
-    return input_tokens, output_tokens
 
 def normalize_column_names(df):
     """

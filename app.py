@@ -1,19 +1,14 @@
 import os
-import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import pandas as pd
 import streamlit as st
 
 from info import (
     DEFAULT_MODEL,
-    MATRIX_BATCH_SIZE,
-    MATRIX_MAX_WORKERS,
     MENTEE_COLUMNS,
     MENTOR_COLUMNS,
 )
 from llm_client import ClaudeClient, LLMError, parse_json
-from matching import apply_country_restrictions, parse_matrix_response
 from prompts import create_default_prompt, get_prompt_for_api
 from ui import CSS_STYLES
 from ui_matches import render_matches_tab
@@ -22,7 +17,6 @@ from ui_upload import render_entity_step
 from utils import (
     estimate_output_tokens,
     is_debug_mode,
-    show_debug_info,
 )
 from validation import prepare_data_for_assistant
 
@@ -34,101 +28,6 @@ st.set_page_config(
 )
 
 st.markdown(CSS_STYLES, unsafe_allow_html=True)
-
-
-def _render_parse_report(report, expected_mentors, expected_mentees):
-    """Render a MatrixParseReport with the same st.* messages the old parser emitted.
-
-    Returns the parsed DataFrame, or None when the batch is unusable, so callers keep the
-    old `parse_matrix_response` contract (df-or-None). Debug gating matches the original.
-    """
-    # Fatal errors the old parser returned on immediately, before any validation output.
-    if report.df is None and report.error and report.error != "No valid mentor data after filtering":
-        if report.error == "Received a configuration object instead of JSON content":
-            st.error("❌ **Invalid response: Received configuration object instead of JSON content**")
-            st.warning("""
-            The model returned a configuration object instead of the match scores.
-
-            **Solution:** Re-run the match, or pick a different Claude model in the sidebar.
-            """)
-        elif report.error == "Could not find JSON object boundaries in response":
-            st.error("❌ Could not find JSON object boundaries in response")
-            with st.expander("View raw response"):
-                st.text(report.raw_excerpt)
-        else:
-            st.error(f"❌ {report.error}")
-            show_debug_info()
-            with st.expander("View raw response"):
-                st.text(report.raw_excerpt)
-        return None
-
-    # Non-fatal: the model wrapped the JSON in extra prose.
-    if report.notes:
-        st.warning("⚠️ AI included explanatory text instead of pure JSON. Attempting to extract JSON...")
-        for note in report.notes:
-            with st.expander("📝 Text around JSON (should be empty)"):
-                st.text(note)
-
-    # Wrong IDs the AI returned (one warning per mentor, then the summaries).
-    for mentor_id in report.wrong_mentors:
-        st.warning(f"⚠️ AI returned WRONG mentor ID: '{mentor_id}' (not in requested batch)")
-    if report.wrong_mentors:
-        st.error(f"🚨 WRONG MENTOR IDs: AI returned {len(report.wrong_mentors)} mentor(s) NOT in requested batch!")
-        with st.expander(f"❌ Wrong mentor IDs ({len(report.wrong_mentors)})"):
-            for m in sorted(report.wrong_mentors):
-                st.write(f"- {m} (REJECTED - not in batch request)")
-
-    if report.wrong_mentees:
-        st.error(f"🚨 WRONG MENTEE IDs: AI returned {len(report.wrong_mentees)} invalid mentee(s)!")
-        with st.expander(f"❌ Wrong mentee IDs ({len(report.wrong_mentees)})"):
-            for m in sorted(report.wrong_mentees)[:10]:
-                st.write(f"- {m}")
-
-    mentors_received = len(expected_mentors) - len(report.missing_mentors)
-    mentees_received = len(expected_mentees) - len(report.missing_mentees_filled)
-    if is_debug_mode():
-        st.caption(
-            f"📊 Valid data: {mentors_received}/{len(expected_mentors)} mentors, "
-            f"{mentees_received}/{len(expected_mentees)} mentees"
-        )
-
-    expected_total = len(expected_mentors) * len(expected_mentees)
-    actual_total = round(report.completion_rate / 100 * expected_total)
-    if report.completion_rate < 100:
-        st.error(
-            f"🚨 INCOMPLETE RESPONSE: Expected {expected_total} scores, got {actual_total} "
-            f"({report.completion_rate:.1f}% complete)"
-        )
-        st.error(f"   Missing {expected_total - actual_total} combinations!")
-        st.error("   ⚠️ The AI is still omitting combinations despite instructions.")
-    elif is_debug_mode():
-        st.caption(f"✅ COMPLETE: All {expected_total} scores received")
-
-    if report.missing_mentors:
-        st.warning(f"⚠️ Missing {len(report.missing_mentors)} requested mentor(s)")
-        with st.expander(f"📋 Missing mentors ({len(report.missing_mentors)})"):
-            for m in sorted(report.missing_mentors):
-                st.write(f"- {m}")
-
-    if report.missing_mentees_filled:
-        st.warning(f"⚠️ Missing {len(report.missing_mentees_filled)} mentee(s) in responses")
-        with st.expander(f"📋 Missing mentees ({len(report.missing_mentees_filled)})"):
-            for m in sorted(report.missing_mentees_filled):
-                st.write(f"- {m}")
-
-    if report.df is None:
-        st.error("❌ No valid mentor data after filtering!")
-        return None
-
-    if report.missing_mentees_filled:
-        st.warning(
-            f"⚠️ {len(report.missing_mentees_filled)} mentee column(s) missing from matrix. "
-            "Filling with 30% (assumed poor match)."
-        )
-        st.caption("The AI omitted these combinations despite instructions. This indicates likely poor matches.")
-        show_debug_info()
-
-    return report.df
 
 
 MATRIX_MODEL = DEFAULT_MODEL  # the model is fixed in code (no user-facing selector)
@@ -225,285 +124,6 @@ def _score_mentor_batch(mentees_df, mentor_batch_df, api_key=None, model=None) -
     budget = max(THINKING_HEADROOM, min(budget, MATRIX_MAX_OUTPUT_TOKENS))
     client = ClaudeClient(model or _model_choice(MATRIX_MODEL), api_key or _anthropic_key())
     return client.complete_json(system, user, max_tokens=budget, cache_system=True)
-
-
-def generate_matrix_in_batches(mentees_df, mentors_df, batch_size=None):
-    """Generate the compatibility matrix one mentor batch at a time (Claude + prompt caching).
-
-    Args:
-        batch_size: Mentors per batch. If None, sized so each batch's estimated output stays
-                    under the 128K output cap.
-
-    The model is st.session_state.model_choice (default MATRIX_MODEL); the key comes from _anthropic_key().
-
-    Returns:
-        Complete matrix DataFrame, or None if no batch succeeded.
-    """
-    from progress_ui import (
-        initialize_progress_tracking,
-        render_batch_card,
-        render_progress_overview,
-        update_batch_progress,
-    )
-
-    all_mentor_ids = mentors_df[MENTOR_COLUMNS['id']].tolist()
-    all_mentee_ids = mentees_df[MENTEE_COLUMNS['id']].tolist()
-
-    if batch_size is None:
-        batch_size = MATRIX_BATCH_SIZE
-
-    mentor_batches = [all_mentor_ids[i:i + batch_size] for i in range(0, len(all_mentor_ids), batch_size)]
-    total_batches = len(mentor_batches)
-
-    # Initialize progress tracking
-    initialize_progress_tracking(total_batches)
-
-    # Initialize all batches as pending
-    for batch_num in range(1, total_batches + 1):
-        update_batch_progress(batch_num, 'pending')
-
-    if is_debug_mode():
-        st.info(f"📦 Processing in {total_batches} batches ({batch_size} mentors per batch)")
-
-    # Create empty container for progress UI (to update in place)
-    progress_placeholder = st.empty()
-
-    # Create a container for completed batch cards (they accumulate)
-    completed_batches_container = st.container()
-
-    combined_matrix_dict = {}
-
-    # Resolve the key and model once, on the main thread: st.secrets / st.session_state are not
-    # thread-safe, so the worker threads below must never touch them.
-    api_key = _anthropic_key()
-    model = _model_choice(MATRIX_MODEL)
-
-    def _fetch(item):
-        """Worker thread: Claude call + pure parse only — NO st.* (Streamlit isn't thread-safe)."""
-        batch_num, mentor_batch = item
-        mentor_batch_df = mentors_df[mentors_df[MENTOR_COLUMNS['id']].isin(mentor_batch)]
-        started = time.time()
-        try:
-            response = _score_mentor_batch(mentees_df, mentor_batch_df, api_key, model)
-        except LLMError as e:
-            # A cut-off or failed batch: report it. Do NOT fall through to a 30-fill.
-            return batch_num, mentor_batch, None, str(e), time.time() - started
-        report = parse_matrix_response(response, mentor_batch, all_mentee_ids)
-        return batch_num, mentor_batch, report, None, time.time() - started
-
-    # Every batch is in flight at once — reflect that before any result lands.
-    for batch_num in range(1, total_batches + 1):
-        update_batch_progress(batch_num, 'processing')
-    with progress_placeholder.container():
-        render_progress_overview()
-
-    # Score the batches concurrently; render + merge each result on the main thread as it lands.
-    with ThreadPoolExecutor(max_workers=min(MATRIX_MAX_WORKERS, total_batches)) as pool:
-        futures = [pool.submit(_fetch, (bn, mb)) for bn, mb in enumerate(mentor_batches, 1)]
-        for future in as_completed(futures):
-            batch_num, mentor_batch, batch_report, err, batch_time = future.result()
-
-            if err is not None:
-                update_batch_progress(batch_num, 'error', {'error': err})
-                st.error(f"❌ Batch {batch_num} failed: {err}")
-                continue
-
-            # _render_parse_report emits the validation messages, so it must run here (main thread).
-            batch_matrix_df = _render_parse_report(batch_report, mentor_batch, all_mentee_ids)
-            if batch_matrix_df is None:
-                update_batch_progress(batch_num, 'error', {'error': 'Failed to parse response'})
-                st.error(f"❌ Batch {batch_num} failed to parse")
-                continue
-
-            # Mentor ids partition the batches, so no mentor can appear twice.
-            for mentor_id in batch_matrix_df.index:
-                combined_matrix_dict[mentor_id] = batch_matrix_df.loc[mentor_id].to_dict()
-
-            batch_details = {
-                'mentors': len(batch_matrix_df),
-                'mentees': len(all_mentee_ids),
-                'scores': len(batch_matrix_df) * len(all_mentee_ids),
-                'time': batch_time,
-                'tokens': None,
-                'cost': None,
-            }
-            update_batch_progress(batch_num, 'complete', batch_details)
-            with progress_placeholder.container():
-                render_progress_overview()
-            with completed_batches_container:
-                render_batch_card(batch_num, 'complete', batch_details)
-
-    if not combined_matrix_dict:
-        st.error("❌ No batches succeeded")
-        return None
-
-    st.divider()
-    if is_debug_mode():
-        st.info("📊 **Combining all batches into final matrix...**")
-    
-    complete_matrix_df = pd.DataFrame(combined_matrix_dict).T
-    complete_matrix_df = complete_matrix_df[[str(m) for m in sorted(all_mentee_ids)]]
-    
-    # Apply country restrictions (Spain-Spain rule)
-    st.divider()
-    st.subheader("🌍 Applying Country Restrictions")
-    st.info("🔍 Checking for country-based restrictions (Spain-Spain rule)...")
-    mentor_country_col = MENTOR_COLUMNS['country']
-    mentee_country_col = MENTEE_COLUMNS['country']
-    if mentor_country_col in mentors_df.columns and mentee_country_col in mentees_df.columns:
-        spain_mentors = (mentors_df[mentor_country_col].astype(str).str.strip().str.lower() == 'spain').sum()
-        spain_mentees = (mentees_df[mentee_country_col].astype(str).str.strip().str.lower() == 'spain').sum()
-        if spain_mentors and spain_mentees:
-            st.info(f"🇪🇸 Found {spain_mentors} Spanish mentor(s) and {spain_mentees} Spanish mentee(s)")
-
-    # Organizer toggle (Configure step); default ["spain"] preserves the legacy Spain-Spain rule.
-    complete_matrix_df, filtered_matches = apply_country_restrictions(
-        complete_matrix_df, mentees_df, mentors_df,
-        countries=st.session_state.get("country_restrictions", ["spain"]),
-    )
-
-    # A missing country column yields a skip-marker; render it like the old warning, no filtering.
-    if filtered_matches and "skipped" in filtered_matches[0]:
-        st.warning(f"⚠️ {filtered_matches[0]['skipped']}. Skipping country restrictions.")
-        filtered_matches = []
-
-    # Display filtered matches information
-    if filtered_matches:
-        st.warning(f"🚫 **Country Restriction Applied**: {len(filtered_matches)} match(es) filtered")
-        with st.expander(f"📋 Filtered Matches Details ({len(filtered_matches)})"):
-            st.markdown("**Rule**: Spanish mentors cannot mentor Spanish mentees")
-            st.markdown("**Action**: Scores set to 0 (invalid match)")
-            st.markdown("---")
-            
-            # Sort by original score (highest first) to show most impactful filters
-            sorted_matches = sorted(filtered_matches, key=lambda x: x['original_score'], reverse=True)
-            
-            # Display as table for better readability
-            matches_data = []
-            for match in sorted_matches:
-                matches_data.append({
-                    'Mentor ID': match['mentor_id'],
-                    'Mentee ID': match['mentee_id'],
-                    'Original Score': f"{match['original_score']:.1f}%",
-                    'Reason': 'Spain-Spain restriction'
-                })
-            
-            if matches_data:
-                matches_df = pd.DataFrame(matches_data)
-                st.dataframe(matches_df, width='stretch', hide_index=True)
-                
-                # Summary statistics
-                avg_score = sum(m['original_score'] for m in sorted_matches) / len(sorted_matches)
-                max_score = sorted_matches[0]['original_score']
-                st.caption(f"📊 Average filtered score: {avg_score:.1f}% | Highest filtered: {max_score:.1f}%")
-    else:
-        st.success("✅ No matches filtered by country restrictions")
-    
-    mentors_received = len(complete_matrix_df)
-    expected_count = len(all_mentor_ids)
-    mentors_in_dict = set(complete_matrix_df.index)
-    mentors_requested = {str(m) for m in all_mentor_ids}
-    
-    missing_from_dict = mentors_requested - mentors_in_dict
-    extra_in_dict = mentors_in_dict - mentors_requested
-    
-    st.success(f"✅ Final matrix: {mentors_received}/{expected_count} mentors")
-    
-    if is_debug_mode():
-        with st.expander("🔍 Final Matrix Validation Details"):
-            st.write(f"**Expected mentors**: {expected_count} (from original data)")
-            st.write(f"**Mentors in dictionary**: {mentors_received} (unique keys)")
-            st.write(f"**Dictionary size**: {len(combined_matrix_dict)} entries")
-            
-            if missing_from_dict:
-                st.error(f"❌ **Missing {len(missing_from_dict)} mentors** that were requested but not in dict:")
-                for m in sorted(missing_from_dict)[:20]:
-                    st.text(f"  - {m}")
-            else:
-                st.success("✅ All requested mentors are in the dictionary!")
-            
-            if extra_in_dict:
-                st.warning(f"⚠️ **Extra {len(extra_in_dict)} mentors** in dict that weren't requested:")
-                for m in sorted(extra_in_dict)[:20]:
-                    st.text(f"  - {m}")
-    
-    if mentors_received < expected_count:
-        st.warning(f"⚠️ **DISCREPANCY**: Expected {expected_count} but only have {mentors_received} in final matrix")
-    
-    if mentors_received < expected_count:
-        missing = {str(m) for m in all_mentor_ids} - set(complete_matrix_df.index)
-        st.warning(f"⚠️ Missing {len(missing)} mentors after initial batches")
-        
-        with st.expander(f"📋 Missing mentors ({len(missing)})"):
-            for m in sorted(missing):
-                st.write(f"- {m}")
-        
-        max_retries = 3
-        for retry_num in range(1, max_retries + 1):
-            # Recalculate what's still missing (convert to strings for comparison)
-            current_missing = {str(m) for m in all_mentor_ids} - set(complete_matrix_df.index)
-            
-            if not current_missing:
-                st.success("🎉 All mentors retrieved!")
-                break
-            
-            st.info(f"🔄 Retry {retry_num}/{max_retries}: Attempting {len(current_missing)} missing mentors...")
-            
-            try:
-                retry_batch_df = mentors_df[
-                    mentors_df[MENTOR_COLUMNS['id']].astype(str).isin(current_missing)
-                ]
-                try:
-                    retry_response = _score_mentor_batch(mentees_df, retry_batch_df)
-                except LLMError as e:
-                    st.error(f"❌ Retry {retry_num} failed to get response: {e!s}")
-                    if retry_num < max_retries:
-                        st.info("⏳ Waiting 5 seconds before next retry...")
-                        time.sleep(5)
-                    continue
-
-                retry_report = parse_matrix_response(retry_response, list(current_missing), all_mentee_ids)
-                retry_matrix_df = _render_parse_report(retry_report, list(current_missing), all_mentee_ids)
-
-                if retry_matrix_df is not None and len(retry_matrix_df) > 0:
-                    added_count = 0
-                    for mentor_id in retry_matrix_df.index:
-                        combined_matrix_dict[mentor_id] = retry_matrix_df.loc[mentor_id].to_dict()
-                        added_count += 1
-                    
-                    st.success(f"✅ Retry {retry_num} successful: Added {added_count} mentors")
-                    
-                    # Rebuild complete matrix from updated dictionary
-                    complete_matrix_df = pd.DataFrame(combined_matrix_dict).T
-                    complete_matrix_df = complete_matrix_df[[str(m) for m in sorted(all_mentee_ids)]]
-                    
-                    mentors_received = len(complete_matrix_df)
-                    st.info(f"📈 Matrix now has {mentors_received}/{expected_count} mentors")
-                    
-                    if mentors_received == expected_count:
-                        st.success(f"🎉 NOW COMPLETE: {mentors_received}/{expected_count} mentors!")
-                        break
-                else:
-                    st.error(f"❌ Retry {retry_num} failed to parse")
-                    if retry_num < max_retries:
-                        st.info("⏳ Waiting 5 seconds before next retry...")
-                        time.sleep(5)
-                        
-            except Exception as e:
-                st.error(f"❌ Retry {retry_num} error: {e!s}")
-                if retry_num < max_retries:
-                    st.info("⏳ Waiting 5 seconds before next retry...")
-                    time.sleep(5)
-        
-        final_missing = {str(m) for m in all_mentor_ids} - set(complete_matrix_df.index)
-        if final_missing:
-            st.warning(f"⚠️ After {max_retries} retries, still missing {len(final_missing)} mentors")
-            with st.expander(f"📋 Permanently missing mentors ({len(final_missing)})"):
-                for m in sorted(final_missing):
-                    st.write(f"- {m}")
-            st.info(f"💡 Continuing with {len(complete_matrix_df)}/{expected_count} mentors. Missing mentors will be excluded from matching.")
-    
-    return complete_matrix_df
 
 
 def reasoning_for_pair(mentee_id, mentor_id, score, mentees_df, mentors_df):
@@ -798,10 +418,6 @@ def main():
         st.session_state.assignments = None
     if 'custom_prompt' not in st.session_state:
         st.session_state.custom_prompt = create_default_prompt()
-    if 'selected_preset' not in st.session_state:
-        st.session_state.selected_preset = "Balanced ⭐"
-    if 'batch_size' not in st.session_state:
-        st.session_state.batch_size = MATRIX_BATCH_SIZE
     if 'max_mentees_per_mentor' not in st.session_state:
         st.session_state.max_mentees_per_mentor = 2
     if 'country_restrictions' not in st.session_state:
