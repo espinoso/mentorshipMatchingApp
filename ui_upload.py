@@ -243,8 +243,7 @@ def run_file_processing(file_type: FileType):
 # CALM PRESENTATION
 # =============================================================================
 def _preview(df: pd.DataFrame, file_type: FileType):
-    """Compact data preview, folded in from the old Data Overview step."""
-    st.caption(f"{len(df)} {file_type}s · {len(df.columns)} columns")
+    """Data preview (shown inside a collapsed expander on the ready view)."""
     show_all = st.toggle("Show all rows", key=f"showall_{file_type}", value=False)
     st.dataframe(df if show_all else df.head(5), use_container_width=True, hide_index=True)
 
@@ -280,13 +279,17 @@ def render_entity_step(file_type: FileType):
         failed = _failed_rows(file_type)
         if failed:
             st.warning(f"⚠️ {failed} row(s) had issues during normalization.")
-        st.success(f"✓ {len(ready_df)} {file_type}s ready.")
-        _preview(ready_df, file_type)
-        if st.button("Replace file", key=f"replace_{file_type}"):
-            _reset_entity(file_type)
-            nonce_key = get_state_key(file_type, 'upload_nonce')
-            st.session_state[nonce_key] = st.session_state.get(nonce_key, 0) + 1
-            st.rerun()
+        status, replace = st.columns([3, 1])
+        with status:
+            st.markdown(f"**✓ {len(ready_df)} {file_type}s ready** · {len(ready_df.columns)} columns")
+        with replace:
+            if st.button("Replace file", key=f"replace_{file_type}", width='stretch'):
+                _reset_entity(file_type)
+                nonce_key = get_state_key(file_type, 'upload_nonce')
+                st.session_state[nonce_key] = st.session_state.get(nonce_key, 0) + 1
+                st.rerun()
+        with st.expander("Preview data", expanded=False):
+            _preview(ready_df, file_type)
         return
 
     # No data yet → show the uploader.

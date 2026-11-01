@@ -36,27 +36,23 @@ def render_matches_tab():
         mentors_df = st.session_state.get('mentors_df')
         mentee_count = len(mentees_df) if mentees_df is not None else 0
         mentor_count = len(mentors_df) if mentors_df is not None else 0
-        total_evaluations = mentee_count * mentor_count
 
-        st.markdown(f"""
+        st.subheader("⚡ Generate")
+        st.markdown("""
         <div class="info-card">
-            <strong>Ready to generate matches!</strong><br>
-            This scores {total_evaluations:,} mentee×mentor pairs with Jev, finds the optimal
-            assignment, then explains each match with Claude.
+            <strong>Ready to generate matches.</strong><br>
+            Jev scores every mentee×mentor pair, scipy finds the optimal assignment,
+            then Claude explains each match.
         </div>
         """, unsafe_allow_html=True)
 
-        col1, col2, col3, col4 = st.columns(4)
+        col1, col2, col3 = st.columns(3)
         with col1:
             st.metric("👥 Mentees", mentee_count)
         with col2:
             st.metric("👨‍🏫 Mentors", mentor_count)
         with col3:
-            st.metric("📈 Evaluations", f"{total_evaluations:,}")
-        with col4:
             st.metric("⚖️ Max per Mentor", st.session_state.get('max_mentees_per_mentor', 2))
-
-        st.caption("Scoring: Jev (System One) · Reasoning: Claude")
 
         if is_debug_mode():
             api_key = st.session_state.get('api_key')

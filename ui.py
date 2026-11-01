@@ -170,19 +170,23 @@ CSS_STYLES = """
         box-shadow: 0 2px 8px rgba(0,0,0,0.12);
     }
     
-    .excellent { 
-        background: #10b981;
+    /* Badge colors match the Excellent→Poor distribution bar (green → red). */
+    .excellent {
+        background: #2E7D32;
     }
-    .strong { 
-        background: #F39220;
+    .strong {
+        background: #66BB6A;
+        color: #1B5E20;
     }
-    .good { 
-        background: #fcb900;
+    .good {
+        background: #FFB300;
         color: #3A3A3A;
     }
-    .fair { 
-        background: #fcb900;
-        color: #3A3A3A;
+    .fair {
+        background: #FB8C00;
+    }
+    .poor {
+        background: #E53935;
     }
     
     /* Professional alert boxes - no shake/bounce animations */
