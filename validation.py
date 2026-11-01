@@ -223,7 +223,7 @@ def clean_text_for_csv(df):
     """Clean text fields to prevent CSV parsing issues"""
     df = df.copy()
     
-    for col in df.select_dtypes(include=['object']).columns:
+    for col in df.select_dtypes(include=['object', 'str']).columns:
         df[col] = df[col].astype(str).str.replace('\n', ' ', regex=False)
         df[col] = df[col].astype(str).str.replace('\r', ' ', regex=False)
         df[col] = df[col].astype(str).str.replace(r'\s+', ' ', regex=True)

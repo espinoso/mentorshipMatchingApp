@@ -95,12 +95,17 @@ def generate_matrix_jev(mentees_df, mentors_df):
             bar.progress(frac, text=f"Scoring with Jev… {done}/{total_pairs} pairs")
 
     try:
-        matrix = score_matrix_jev(mentees_df, mentors_df, key, progress_cb=on_progress)
+        matrix, unscored = score_matrix_jev(mentees_df, mentors_df, key, progress_cb=on_progress)
     except JevError as e:
         bar.empty()
         st.error(f"❌ Jev scoring failed: {e}")
         return None
     bar.empty()
+    if unscored:
+        st.warning(
+            f"⚠️ {unscored} mentee×mentor pair(s) couldn't be scored after retries and were treated "
+            "as 0 (poor match). Matches may be degraded — re-run for a clean matrix if they look off."
+        )
     return matrix
 
 

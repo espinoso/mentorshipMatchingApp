@@ -34,11 +34,10 @@ MENTEE_COLUMNS = {
 
 # =====================================================================
 # MODEL CONFIGURATION (Claude)
-# CLAUDE_MODELS are the user-selectable matrix/reasoning models; Haiku is
-# used internally by normalization and is not offered in the selector.
+# The model is fixed in code — Opus for reasoning, Haiku internally for
+# normalization. There is no user-facing selector. Scoring is Jev, not Claude.
 # =====================================================================
 
-CLAUDE_MODELS = ["claude-opus-5-5", "claude-sonnet-5-5"]
 DEFAULT_MODEL = "claude-opus-5-5"
 
 # Matrix scoring: small mentor batches scored CONCURRENTLY. Small batches keep each call fast
@@ -47,37 +46,12 @@ DEFAULT_MODEL = "claude-opus-5-5"
 MATRIX_BATCH_SIZE = 8
 MATRIX_MAX_WORKERS = 6
 
-MODEL_CONFIGS = {
-    'claude-opus-5-5': {
-        'family': 'opus',
-        'quality': 'Best',
-        'speed': 'Slower',
-        'max_output_tokens': 128000,
-    },
-    'claude-sonnet-5-5': {
-        'family': 'sonnet',
-        'quality': 'Excellent',
-        'speed': 'Faster',
-        'max_output_tokens': 128000,
-    },
-    'claude-haiku-5-5': {
-        'family': 'haiku',
-        'quality': 'Good',
-        'speed': 'Fastest',
-        'max_output_tokens': 128000,
-    },
-}
 
 # =====================================================================
 # API PRICING
 # USD per 1M tokens (Claude)
 # =====================================================================
 
-API_PRICING = {
-    "claude-opus-5-5": {"prompt": 4.00, "completion": 20.00},
-    "claude-sonnet-5-5": {"prompt": 2.00, "completion": 10.00},
-    "claude-haiku-5-5": {"prompt": 0.10, "completion": 0.50},
-}
 
 # =====================================================================
 # FIELD COMPATIBILITY
@@ -564,4 +538,3 @@ When in doubt, assign 0 points. Do NOT invent relationships.
    Life Sciences, Engineering, Computer Science, Business, Social Sciences,
    Humanities, Design, Environmental Sciences, and more.
 """
-

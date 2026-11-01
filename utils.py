@@ -3,12 +3,8 @@ import pandas as pd
 import streamlit as st
 
 from info import (
-    API_PRICING,
-    CLAUDE_MODELS,
-    DEFAULT_MODEL,
     MENTEE_COLUMNS,
     MENTOR_COLUMNS,
-    MODEL_CONFIGS,
     RELATED_FIELD_GROUPS,
 )
 
@@ -94,19 +90,6 @@ def validate_uploaded_file(df, file_type):
     return errors, warnings, completeness
 
 
-def fetch_available_models(api_key=None):
-    """Static list of the selectable Claude models: model_id -> display info (api_key is unused)."""
-    return {
-        m: {
-            "name": m,
-            "quality": MODEL_CONFIGS[m]["quality"],
-            "speed": MODEL_CONFIGS[m]["speed"],
-            "cost": f"${API_PRICING[m]['prompt']:.2f} in / ${API_PRICING[m]['completion']:.2f} out per 1M tokens",
-        }
-        for m in CLAUDE_MODELS
-    }
-
-
 def estimate_output_tokens(num_mentors: int, num_mentees: int) -> int:
     """
     Estimate output tokens for compatibility matrix.
@@ -179,16 +162,13 @@ def clean_dataframe(df):
     
     df = normalize_column_names(df)
     
-    for col in df.select_dtypes(include=['object']).columns:
+    for col in df.select_dtypes(include=['object', 'str']).columns:
         df[col] = df[col].astype(str).str.strip()
         df[col] = df[col].replace('nan', '')
         df[col] = df[col].replace('', np.nan)
     
     return df
 
-def get_model_config(model_name):
-    """Get configuration for a specific model"""
-    return MODEL_CONFIGS.get(model_name, MODEL_CONFIGS[DEFAULT_MODEL])
 
 def is_field_compatible(field1, field2):
     """
@@ -227,50 +207,3 @@ def is_debug_mode():
     # Read from environment variable; default OFF in production.
     debug_env = os.getenv('DEBUG_MODE', '').upper().strip()
     return debug_env == 'TRUE'
-
-
-def format_time(seconds):
-    """Format seconds to human-readable time string
-    
-    Args:
-        seconds: Time in seconds (float or int)
-        
-    Returns:
-        str: Formatted time string (e.g., "23s", "2m 34s", "1h 15m")
-    """
-    if seconds < 60:
-        return f"{int(seconds)}s"
-    
-    minutes = int(seconds // 60)
-    secs = int(seconds % 60)
-    
-    if minutes < 60:
-        if secs > 0:
-            return f"{minutes}m {secs}s"
-        return f"{minutes}m"
-    
-    hours = int(minutes // 60)
-    mins = int(minutes % 60)
-    
-    if mins > 0:
-        return f"{hours}h {mins}m"
-    return f"{hours}h"
-
-
-def calculate_eta(completed, total, elapsed_times):
-    """Calculate estimated time remaining based on average batch time
-    
-    Args:
-        completed: Number of completed batches (int)
-        total: Total number of batches (int)
-        elapsed_times: List of elapsed times for completed batches (list of floats)
-        
-    Returns:
-        float or None: Estimated seconds remaining, or None if cannot calculate
-    """
-    if not elapsed_times or completed >= total:
-        return None
-    
-    avg_time = sum(elapsed_times) / len(elapsed_times)
-    remaining = total - completed
-    return avg_time * remaining

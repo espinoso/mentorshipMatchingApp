@@ -51,11 +51,12 @@ def _profile(row, cols):
 
 
 def score_matrix_jev(mentees_df, mentors_df, api_key, *, progress_cb=None, workers=JEV_WORKERS, client=None):
-    """Score every mentee×mentor pair with Jev; return a mentors×mentees DataFrame of 0-100 scores.
+    """Score every mentee×mentor pair with Jev; return (mentors×mentees DataFrame of 0-100, unscored).
 
     progress_cb(done, total), if given, is called on the calling thread as each pair resolves.
-    A pair that still fails after retries is left at 0. If NO pair scores, raises JevError rather
-    than returning a silent all-zero matrix (which would corrupt the assignment).
+    A pair that still fails after retries is left at 0; `unscored` is how many such pairs there were,
+    so the caller can warn rather than silently matching on fake zeros. If NO pair scores, raises
+    JevError rather than returning a silent all-zero matrix (which would corrupt the assignment).
     client is injectable for tests; otherwise a TypeSafeClient is created from api_key.
     """
     from typesafe_sdk import Score, TypeSafeClient
@@ -109,4 +110,4 @@ def score_matrix_jev(mentees_df, mentors_df, api_key, *, progress_cb=None, worke
     scored = int(full.notna().sum().sum())
     if scored == 0:
         raise JevError("Jev returned no scores — check the API key and connectivity.")
-    return full.fillna(0)
+    return full.fillna(0), int(full.size - scored)
