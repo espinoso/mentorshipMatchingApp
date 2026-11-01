@@ -506,9 +506,21 @@ def generate_matrix_in_batches(mentees_df, mentors_df, batch_size=None):
     return complete_matrix_df
 
 
-def get_reasoning_for_assignments(assignments, mentees_df, mentors_df):
+def reasoning_for_pair(mentee_id, mentor_id, score, mentees_df, mentors_df):
+    """One assignment's reasoning, for on-demand display. Returns the text, or a plain fallback
+    if Claude is unavailable. Callers cache it (reasoning is generated only when a match is opened)."""
+    d = get_reasoning_for_assignments([(mentee_id, mentor_id, score)], mentees_df, mentors_df, quiet=True)
+    texts = list(d.values())
+    return texts[0] if texts else (
+        f"Selected by the optimizer as the best available match ({score}%). "
+        "A detailed explanation isn't available right now."
+    )
+
+
+def get_reasoning_for_assignments(assignments, mentees_df, mentors_df, *, quiet=False):
     """Get a short reasoning per assignment from Claude; {} on any failure (non-critical).
 
+    quiet suppresses the success/failure toasts (used for single-pair, on-demand lookups).
     The model is st.session_state.model_choice (default REASONING_MODEL); the key comes from _anthropic_key().
     """
     try:
@@ -612,14 +624,16 @@ def get_reasoning_for_assignments(assignments, mentees_df, mentors_df):
             for r in entries
             if isinstance(r, dict) and {"mentee_id", "mentor_id", "reasoning"} <= r.keys()
         }
-        st.success(f"✅ Got reasoning for {len(reasoning_dict)} assignments")
+        if not quiet:
+            st.success(f"✅ Got reasoning for {len(reasoning_dict)} assignments")
         return reasoning_dict
 
     except Exception as e:
-        st.error("❌ Error getting reasoning")
-        if is_debug_mode():
-            st.error(f"❌ Error getting reasoning: {e!s}")
-        st.info("💡 Continuing without detailed reasoning...")
+        if not quiet:
+            st.error("❌ Error getting reasoning")
+            if is_debug_mode():
+                st.error(f"❌ Error getting reasoning: {e!s}")
+            st.info("💡 Continuing without detailed reasoning...")
         return {}
 
 

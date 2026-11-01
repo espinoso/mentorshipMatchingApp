@@ -20,6 +20,39 @@ from validation import analyze_score_distribution, validate_and_flag_matches
 from visualization import create_heatmap
 
 
+def _matches_report_bytes(matches, mentees_df, mentors_df, assignments, reasoning_by_pair=None):
+    """Build the Excel report (Matches/Mentees/Mentors/Summary). reasoning_by_pair, when given,
+    is {(str mentee_id, str mentor_id): text} and fills the Reasoning column; otherwise it's blank."""
+    rows = []
+    for md in matches:
+        for m in md['matches']:
+            reason = ""
+            if reasoning_by_pair:
+                reason = reasoning_by_pair.get((str(md['mentee_id']), str(m['mentor_id'])), "")
+            rows.append({
+                'Mentee_ID': md['mentee_id'], 'Rank': m['rank'], 'Mentor_ID': m['mentor_id'],
+                'Match_Percentage': m['match_percentage'], 'Match_Quality': m['match_quality'],
+                'Reasoning': reason,
+            })
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        pd.DataFrame(rows).to_excel(writer, sheet_name='Matches', index=False)
+        mentees_df.to_excel(writer, sheet_name='Mentees', index=False)
+        mentors_df.to_excel(writer, sheet_name='Mentors', index=False)
+        if assignments:
+            pd.DataFrame({
+                'Metric': ['Total Matches', 'Average Score', 'Min Score', 'Max Score', 'Generated At'],
+                'Value': [
+                    len(assignments),
+                    f"{np.mean([s for _, _, s in assignments]):.1f}%",
+                    f"{min(s for _, _, s in assignments)}%",
+                    f"{max(s for _, _, s in assignments)}%",
+                    time.strftime('%Y-%m-%d %H:%M:%S'),
+                ],
+            }).to_excel(writer, sheet_name='Summary', index=False)
+    return output.getvalue()
+
+
 def get_country_flag(country_name):
     """Convert country name to flag emoji (basic mapping for common countries)"""
     if not country_name or pd.isna(country_name):
@@ -179,7 +212,7 @@ def render_processing_tab():
                 """, unsafe_allow_html=True)
             
             # Import API functions from app.py (will be moved to api_client.py later)
-            from app import generate_matrix_jev, get_reasoning_for_assignments
+            from app import generate_matrix_jev
 
             # Score the compatibility matrix with Jev (System One); assignment + reasoning follow.
             matrix_df = generate_matrix_jev(
@@ -244,83 +277,24 @@ def render_processing_tab():
                 else:
                     st.success(f"✅ Optimal assignments found! Average score: {avg_score:.1f}%")
                 
-                # PHASE 3: Get reasoning for assignments
-                if is_debug_mode():
-                    st.markdown("""
-                    <div class="info-card">
-                        🧠 <strong>Phase 3: Getting detailed reasoning for assignments...</strong>
-                    </div>
-                    """, unsafe_allow_html=True)
-                else:
-                    st.info("🧠 Getting detailed reasoning...")
-                
-                reasoning_dict = get_reasoning_for_assignments(
-                    assignments,
-                    st.session_state.mentees_df,
-                    st.session_state.mentors_df,
-                )
-            
-                # Convert to old format for compatibility with display code
-                matches = []
-                
-                # Debug: Show what we're looking for vs what we have (only in debug mode)
-                if is_debug_mode() and assignments and reasoning_dict:
-                    st.info(f"🔍 Looking up reasoning: {len(assignments)} assignments, {len(reasoning_dict)} reasoning entries")
-                    sample_assignment = assignments[0]
-                    sample_key = (sample_assignment[0], sample_assignment[1])
-                    with st.expander("🔍 Debug: Key matching"):
-                        st.write(f"Sample assignment key: {sample_key}")
-                        st.write(f"Sample assignment types: ({type(sample_assignment[0]).__name__}, {type(sample_assignment[1]).__name__})")
-                        if reasoning_dict:
-                            sample_reason_key = next(iter(reasoning_dict.keys()))
-                            st.write(f"Sample reasoning key: {sample_reason_key}")
-                            st.write(f"Sample reasoning types: ({type(sample_reason_key[0]).__name__}, {type(sample_reason_key[1]).__name__})")
-                            st.write(f"Keys match? {sample_key in reasoning_dict}")
-                
-                # Helper function to find reasoning with flexible key matching
-                def find_reasoning(mentee_id, mentor_id, reasoning_dict):
-                    """Try multiple key formats to find reasoning"""
-                    # Extract numeric parts if present
-                    mentee_num = re.search(r'\d+', str(mentee_id))
-                    mentor_num = re.search(r'\d+', str(mentor_id))
-                    
-                    # Try various key combinations
-                    possible_keys = [
-                        (mentee_id, mentor_id),  # Original format
-                        (str(mentee_id), str(mentor_id)),  # String versions
-                    ]
-                    
-                    # Add numeric-only versions if we found numbers
-                    if mentee_num and mentor_num:
-                        possible_keys.append((mentee_num.group(), mentor_num.group()))
-                    
-                    # Try each possible key
-                    for key in possible_keys:
-                        if key in reasoning_dict:
-                            return reasoning_dict[key]
-                    
-                    # No match found
-                    return None
-                
-                for mentee, mentor, score in assignments:
-                    # Try to find reasoning with flexible matching
-                    reasoning = find_reasoning(mentee, mentor, reasoning_dict)
-                    
-                    # Fallback if no reasoning found
-                    if reasoning is None:
-                        reasoning = f"This match was selected by the Hungarian optimization algorithm as the globally optimal assignment with a {score}% compatibility score. Detailed reasoning was unavailable."
-                    
-                    matches.append({
+                # Reasoning is fetched on demand (per match, via the "Why this match?" button),
+                # not up front — the bulk call was the slowest, priciest step and most of it went unread.
+                matches = [
+                    {
                         'mentee_id': mentee,
                         'matches': [{
                             'rank': 1,
                             'mentor_id': mentor,
                             'match_percentage': score,
-                            'match_quality': 'Excellent' if score >= 90 else 'Strong' if score >= 75 else 'Good' if score >= 60 else 'Fair',
-                            'reasoning': reasoning
-                        }]
-                    })
-                
+                            'match_quality': (
+                                'Excellent' if score >= 90 else 'Strong' if score >= 75
+                                else 'Good' if score >= 60 else 'Fair'
+                            ),
+                            'reasoning': None,
+                        }],
+                    }
+                    for mentee, mentor, score in assignments
+                ]
                 st.session_state.matches = matches
                 st.success(f"✅ Complete! {len(matches)} mentees optimally matched!")
                 
@@ -412,50 +386,35 @@ def render_processing_tab():
         # Results display
         st.divider()
         
-        # Excel export
+        # Export — plain is instant; the reasoning version is generated on demand (it costs tokens).
         st.subheader("📥 Export Results")
-        output = BytesIO()
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            # Results sheet
-            results_data = []
-            for match_data in st.session_state.matches:
-                for match in match_data['matches']:
-                    results_data.append({
-                        'Mentee_ID': match_data['mentee_id'],
-                        'Rank': match['rank'],
-                        'Mentor_ID': match['mentor_id'],
-                        'Match_Percentage': match['match_percentage'],
-                        'Match_Quality': match['match_quality'],
-                        'Reasoning': match['reasoning']
-                    })
-            
-            pd.DataFrame(results_data).to_excel(writer, sheet_name='Matches', index=False)
-            st.session_state.mentees_df.to_excel(writer, sheet_name='Mentees', index=False)
-            st.session_state.mentors_df.to_excel(writer, sheet_name='Mentors', index=False)
-        
-        # Add summary sheet
-        if st.session_state.assignments:
-            summary_data = {
-                'Metric': ['Total Matches', 'Average Score', 'Min Score', 'Max Score', 'Generated At'],
-                'Value': [
-                    len(st.session_state.assignments),
-                    f"{np.mean([s for _, _, s in st.session_state.assignments]):.1f}%",
-                    f"{min([s for _, _, s in st.session_state.assignments])}%",
-                    f"{max([s for _, _, s in st.session_state.assignments])}%",
-                    time.strftime('%Y-%m-%d %H:%M:%S')
-                ]
-            }
-            with pd.ExcelWriter(output, engine='openpyxl', mode='a') as writer:
-                pd.DataFrame(summary_data).to_excel(writer, sheet_name='Summary', index=False)
-        
-        output.seek(0)
-        st.download_button(
-            "📊 Download Excel Report",
-            output.getvalue(),
-            f"matches_{time.strftime('%Y%m%d_%H%M%S')}.xlsx",
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            type="primary"
-        )
+        stamp = time.strftime('%Y%m%d_%H%M%S')
+        xlsx_mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        col_plain, col_reason = st.columns(2)
+        with col_plain:
+            st.download_button(
+                "📥 Download matches",
+                _matches_report_bytes(st.session_state.matches, st.session_state.mentees_df,
+                                      st.session_state.mentors_df, st.session_state.assignments),
+                f"matches_{stamp}.xlsx", xlsx_mime, width='stretch',
+            )
+        with col_reason:
+            if st.button("🧠 Prepare matches + reasonings", width='stretch',
+                         help="Generates a Claude explanation for every match, then offers the download."):
+                from app import get_reasoning_for_assignments
+                with st.spinner(f"Generating reasonings for {len(st.session_state.assignments)} matches…"):
+                    rdict = get_reasoning_for_assignments(
+                        st.session_state.assignments, st.session_state.mentees_df, st.session_state.mentors_df)
+                    rby = {(str(k[0]), str(k[1])): v for k, v in rdict.items()}
+                    st.session_state.export_with_reasoning = _matches_report_bytes(
+                        st.session_state.matches, st.session_state.mentees_df,
+                        st.session_state.mentors_df, st.session_state.assignments, rby)
+            if st.session_state.get("export_with_reasoning"):
+                st.download_button(
+                    "📥 Download matches + reasonings",
+                    st.session_state.export_with_reasoning,
+                    f"matches_reasonings_{stamp}.xlsx", xlsx_mime, width='stretch', type="primary",
+                )
         
         st.divider()
         
@@ -545,13 +504,26 @@ def render_processing_tab():
                     mentee_field_label = f'<span style="background: #F5F5F7; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.85rem; margin-left: 0.5rem;">{mentee_field or "N/A"}</span>' if mentee_field else ''
                     mentor_field_label = f'<span style="background: #F5F5F7; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.85rem; margin-left: 0.5rem;">{mentor_field or "N/A"}</span>' if mentor_field else ''
                     
-                    st.markdown(f"""
-                    <div class="match-card">
-                        <h4>Mentee {mentee_id} {mentee_flag} {mentee_field_label} → Mentor {mentor_id} {mentor_flag} {mentor_field_label}</h4>
-                        <p><span class="percentage-badge {quality_class}">{match['match_percentage']}% - {match['match_quality']}</span></p>
-                        <p><strong>Reasoning:</strong> {match['reasoning']}</p>
-                    </div>
-                    """, unsafe_allow_html=True)
+                    with st.container(border=True):
+                        st.markdown(
+                            f'<h4>Mentee {mentee_id} {mentee_flag} {mentee_field_label} → '
+                            f'Mentor {mentor_id} {mentor_flag} {mentor_field_label}</h4>'
+                            f'<p><span class="percentage-badge {quality_class}">'
+                            f'{match["match_percentage"]}% - {match["match_quality"]}</span></p>',
+                            unsafe_allow_html=True,
+                        )
+                        # Reasoning is fetched on demand and cached, so we only pay for matches opened.
+                        cache = st.session_state.setdefault("reasoning_cache", {})
+                        ck = (str(mentee_id), str(mentor_id))
+                        if st.button("💡 Why this match?", key=f"why_{mentee_id}_{mentor_id}") and ck not in cache:
+                            from app import reasoning_for_pair
+                            with st.spinner("Asking Claude…"):
+                                cache[ck] = reasoning_for_pair(
+                                    mentee_id, mentor_id, match['match_percentage'],
+                                    st.session_state.mentees_df, st.session_state.mentors_df,
+                                )
+                        if ck in cache:
+                            st.markdown(f"**Reasoning:** {cache[ck]}")
     else:
         # Show waiting message if no matches yet
         st.info("👆 Click 'Generate Matches' in the Generate step to start the matching process.")
