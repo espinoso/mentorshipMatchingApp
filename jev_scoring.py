@@ -28,7 +28,12 @@ _CRITERIA = [
     "Strong: the same field with clear specialization or skills overlap.",
     "Excellent: same field, closely matched specialization, comparable level, strong skills overlap.",
 ]
-_PROFILE_FIELDS = ("field", "specialization", "education_level", "affiliation", "country", "skills")
+# Mentee-only keys (guidance_areas, career_goals) and mentor-only keys (experience_years,
+# current_position) coexist here: _profile skips any key a given side's column map lacks.
+_PROFILE_FIELDS = (
+    "field", "specialization", "education_level", "affiliation", "country", "skills",
+    "guidance_areas", "career_goals", "experience_years", "current_position",
+)
 
 
 class JevError(Exception):
