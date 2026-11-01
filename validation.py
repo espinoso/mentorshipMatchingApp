@@ -10,13 +10,14 @@ from info import MENTEE_COLUMNS, MENTOR_COLUMNS
 from utils import is_field_compatible
 
 
-def validate_and_flag_matches(matches, mentees_df, mentors_df):
+def validate_and_flag_matches(matches, mentees_df, mentors_df, *, render=True):
     """
     Validate match scores and flag suspicious high scores
     This helps identify when AI is inflating scores incorrectly
     """
-    st.info("🔍 Validating match quality...")
-    
+    if render:
+        st.info("🔍 Validating match quality...")
+
     flagged = []
     stats = {
         'total': 0,
@@ -52,7 +53,8 @@ def validate_and_flag_matches(matches, mentees_df, mentors_df):
                 mentee = mentees_df[mentees_df[MENTEE_COLUMNS['id']] == mentee_id_int].iloc[0]
                 mentor = mentors_df[mentors_df[MENTOR_COLUMNS['id']] == mentor_id_int].iloc[0]
             except (ValueError, IndexError) as e:
-                st.warning(f"⚠️ Could not extract details for {mentee_id} → {mentor_id}: {e}")
+                if render:
+                    st.warning(f"⚠️ Could not extract details for {mentee_id} → {mentor_id}: {e}")
                 continue
             
             issues = []
@@ -99,36 +101,36 @@ def validate_and_flag_matches(matches, mentees_df, mentors_df):
                     'issues': issues
                 })
     
-    st.markdown("### 📊 Score Distribution")
-    col1, col2, col3, col4, col5 = st.columns(5)
-    with col1:
-        st.metric("Excellent (≥85%)", stats['excellent'])
-    with col2:
-        st.metric("Strong (75-84%)", stats['strong'])
-    with col3:
-        st.metric("Good (60-74%)", stats['good'])
-    with col4:
-        st.metric("Fair (45-59%)", stats['fair'])
-    with col5:
-        st.metric("Poor (<45%)", stats['poor'])
-    
-    if matches:
-        all_scores = [match['match_percentage'] for match_data in matches for match in match_data['matches']]
-        avg_score = sum(all_scores) / len(all_scores) if all_scores else 0
-        st.info(f"📈 Average Score: {avg_score:.1f}%")
-    
-    if flagged:
-        st.warning(f"⚠️ {len(flagged)} matches flagged for review")
-        
-        with st.expander(f"🚩 View Flagged Matches ({len(flagged)})"):
-            for fm in flagged:
-                st.error(f"**{fm['mentee_id']} → {fm['mentor_id']}** ({fm['score']}%)")
-                for issue in fm['issues']:
-                    st.write(f"  • {issue}")
-                st.divider()
-    else:
-        st.success("✅ All matches passed validation checks!")
-    
+    if render:
+        st.markdown("### 📊 Score Distribution")
+        col1, col2, col3, col4, col5 = st.columns(5)
+        with col1:
+            st.metric("Excellent (≥85%)", stats['excellent'])
+        with col2:
+            st.metric("Strong (75-84%)", stats['strong'])
+        with col3:
+            st.metric("Good (60-74%)", stats['good'])
+        with col4:
+            st.metric("Fair (45-59%)", stats['fair'])
+        with col5:
+            st.metric("Poor (<45%)", stats['poor'])
+
+        if matches:
+            all_scores = [match['match_percentage'] for match_data in matches for match in match_data['matches']]
+            avg_score = sum(all_scores) / len(all_scores) if all_scores else 0
+            st.info(f"📈 Average Score: {avg_score:.1f}%")
+
+        if flagged:
+            st.warning(f"⚠️ {len(flagged)} matches flagged for review")
+            with st.expander(f"🚩 View Flagged Matches ({len(flagged)})"):
+                for fm in flagged:
+                    st.error(f"**{fm['mentee_id']} → {fm['mentor_id']}** ({fm['score']}%)")
+                    for issue in fm['issues']:
+                        st.write(f"  • {issue}")
+                    st.divider()
+        else:
+            st.success("✅ All matches passed validation checks!")
+
     return flagged, stats
 
 
