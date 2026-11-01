@@ -53,6 +53,48 @@ def _matches_report_bytes(matches, mentees_df, mentors_df, assignments, reasonin
     return output.getvalue()
 
 
+_BANDS = [
+    ("Excellent", "excellent", "#2E7D32"),
+    ("Strong", "strong", "#66BB6A"),
+    ("Good", "good", "#FFB300"),
+    ("Fair", "fair", "#FB8C00"),
+    ("Poor", "poor", "#E53935"),
+]
+
+
+def _distribution_bar(stats):
+    """One slim stacked bar (Excellent→Poor) + legend, replacing the five big metric tiles."""
+    counts = [(label, int(stats.get(key, 0)), color) for label, key, color in _BANDS]
+    total = sum(c for _, c, _ in counts) or 1
+    segs = "".join(
+        f'<div title="{label}: {c}" style="width:{100 * c / total:.1f}%;background:{color};"></div>'
+        for label, c, color in counts if c
+    )
+    legend = " &nbsp; ".join(
+        f'<span style="color:{color};">■</span> {label} {c}' for label, c, color in counts
+    )
+    return (
+        f'<div style="display:flex;height:14px;border-radius:7px;overflow:hidden;margin:0.35rem 0;">{segs}</div>'
+        f'<div style="font-size:0.8rem;color:#777;">{legend}</div>'
+    )
+
+
+def _render_results_header(assignments, stats, flagged):
+    """Compact results header: one summary line + a slim distribution bar + the flagged review list."""
+    scores = [s for _, _, s in assignments]
+    avg = np.mean(scores) if scores else 0
+    review = f"⚠️ {len(flagged)} to review" if flagged else "✅ all clear"
+    st.markdown(f"#### ✅ {len(assignments)} matched &nbsp;·&nbsp; avg {avg:.0f}% &nbsp;·&nbsp; {review}")
+    if stats:
+        st.markdown(_distribution_bar(stats), unsafe_allow_html=True)
+    if flagged:
+        with st.expander(f"🚩 Review {len(flagged)} flagged match(es)"):
+            for fm in flagged:
+                st.markdown(f"**Mentee {fm['mentee_id']} → Mentor {fm['mentor_id']}** ({fm['score']}%)")
+                for issue in fm['issues']:
+                    st.caption(f"• {issue}")
+
+
 def get_country_flag(country_name):
     """Convert country name to flag emoji (basic mapping for common countries)"""
     if not country_name or pd.isna(country_name):
@@ -222,27 +264,6 @@ def render_processing_tab():
             
             if matrix_df is not None:
                 st.session_state.matrix_df = matrix_df
-                if is_debug_mode():
-                    st.markdown(f"""
-                    <div class="success-card">
-                        ✅ <strong>Matrix generated successfully!</strong><br>
-                        {len(matrix_df)} mentors × {len(matrix_df.columns)} mentees = {len(matrix_df) * len(matrix_df.columns)} evaluations!
-                    </div>
-                    """, unsafe_allow_html=True)
-                else:
-                    st.success(f"✅ Matrix generated: {len(matrix_df)} mentors × {len(matrix_df.columns)} mentees")
-                
-                # PHASE 2: Apply Hungarian algorithm for optimal assignment
-                if is_debug_mode():
-                    st.markdown("""
-                    <div class="info-card">
-                        🧮 <strong>Phase 2: Running Hungarian algorithm for optimal assignments...</strong>
-                    </div>
-                    """, unsafe_allow_html=True)
-                else:
-                    st.info("🧮 Finding optimal assignments...")
-                
-                # Get max_mentees_per_mentor from session state (default to 2 for backward compatibility)
                 max_mentees_per_mentor = st.session_state.get('max_mentees_per_mentor', 2)
                 result = hungarian_assignment(matrix_df, max_mentees_per_mentor=max_mentees_per_mentor)
 
@@ -261,22 +282,7 @@ def render_processing_tab():
 
                 assignments = result.assignments
                 st.session_state.assignments = assignments
-                
-                # Calculate statistics
-                avg_score = np.mean([score for _, _, score in assignments])
-                min_score = min([score for _, _, score in assignments])
-                max_score = max([score for _, _, score in assignments])
-                
-                if is_debug_mode():
-                    st.markdown(f"""
-                    <div class="success-card">
-                        ✅ <strong>Optimal assignments found!</strong><br>
-                        Avg: {avg_score:.1f}%, Min: {min_score}%, Max: {max_score}%
-                    </div>
-                    """, unsafe_allow_html=True)
-                else:
-                    st.success(f"✅ Optimal assignments found! Average score: {avg_score:.1f}%")
-                
+
                 # Reasoning is fetched on demand (per match, via the "Why this match?" button),
                 # not up front — the bulk call was the slowest, priciest step and most of it went unread.
                 matches = [
@@ -296,13 +302,13 @@ def render_processing_tab():
                     for mentee, mentor, score in assignments
                 ]
                 st.session_state.matches = matches
-                st.success(f"✅ Complete! {len(matches)} mentees optimally matched!")
-                
-                # Validate match quality
+
+                # Validate match quality (compute only; the compact header renders the summary).
                 flagged_matches, score_stats = validate_and_flag_matches(
                     st.session_state.matches,
                     st.session_state.mentees_df,
-                    st.session_state.mentors_df
+                    st.session_state.mentors_df,
+                    render=False,
                 )
                 
                 # Store validation results for reference
@@ -319,20 +325,12 @@ def render_processing_tab():
     # Display results
     if st.session_state.matches:
         st.divider()
-        st.subheader("📊 Matching Results")
-        
-        # Display statistics
         if st.session_state.assignments:
-            scores = [score for _, _, score in st.session_state.assignments]
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.metric("Total Matches", len(st.session_state.assignments))
-            with col2:
-                st.metric("Avg Score", f"{np.mean(scores):.1f}%")
-            with col3:
-                st.metric("Min Score", f"{min(scores)}%")
-            with col4:
-                st.metric("Max Score", f"{max(scores)}%")
+            _render_results_header(
+                st.session_state.assignments,
+                st.session_state.get('score_stats'),
+                st.session_state.get('flagged_matches') or [],
+            )
         
         # Show score distribution analysis (only in debug mode)
         if is_debug_mode() and st.session_state.matrix_df is not None:
