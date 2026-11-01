@@ -17,7 +17,7 @@ from matching import apply_country_restrictions, parse_matrix_response
 from prompts import create_default_prompt, get_prompt_for_api
 from ui import CSS_STYLES
 from ui_matches import render_matches_tab
-from ui_processing import render_processing_tab
+from ui_processing import render_processing_tab, render_review_tab
 from ui_upload import render_entity_step
 from utils import (
     estimate_output_tokens,
@@ -639,7 +639,7 @@ def get_reasoning_for_assignments(assignments, mentees_df, mentors_df, *, quiet=
 
 # --------------------------------------------------------------------------- navigation + rail
 
-_STEPS = ["Mentees", "Mentors", "Generate", "Results"]
+_STEPS = ["Mentees", "Mentors", "Generate", "Results", "Review"]
 
 
 def _reachable(has_data: bool, has_results: bool) -> set[int]:
@@ -648,7 +648,7 @@ def _reachable(has_data: bool, has_results: bool) -> set[int]:
     if has_data:
         s.add(2)  # Generate
     if has_results:
-        s.add(3)  # Results
+        s.update({3, 4})  # Results (overview), Review (matches list)
     return s
 
 
@@ -842,8 +842,10 @@ def main():
         render_entity_step("mentor")
     elif step == 2:
         render_matches_tab()
+    elif step == 3:
+        render_processing_tab()  # Results: overview + heatmap
     else:
-        render_processing_tab()
+        render_review_tab()  # Review: the matches list you act on
 
 
 if __name__ == "__main__":
