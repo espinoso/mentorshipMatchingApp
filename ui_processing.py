@@ -422,9 +422,18 @@ def render_processing_tab():
         # Show heatmap
         if st.session_state.matrix_df is not None:
             st.subheader("🔥 Compatibility Heatmap")
-            st.caption("Blue boxes show optimal assignments selected by Hungarian algorithm")
-            
-            fig = create_heatmap(st.session_state.matrix_df, st.session_state.assignments)
+            st.caption("Grouped by field so same-field matches cluster · blue outline = chosen match · hover a cell for detail")
+
+            mentee_fields = {
+                str(r[MENTEE_COLUMNS['id']]): r[MENTEE_COLUMNS['field']]
+                for _, r in st.session_state.mentees_df.iterrows()
+            }
+            mentor_fields = {
+                str(r[MENTOR_COLUMNS['id']]): r[MENTOR_COLUMNS['field']]
+                for _, r in st.session_state.mentors_df.iterrows()
+            }
+            fig = create_heatmap(st.session_state.matrix_df, st.session_state.assignments,
+                                 mentee_fields, mentor_fields)
             # Pass config parameter explicitly to avoid deprecation warning
             # This tells Streamlit/Plotly to use config dict instead of keyword arguments
             st.plotly_chart(
