@@ -19,6 +19,16 @@ from llm_client import ClaudeClient
 NORMALIZATION_MODEL = "claude-haiku-5-5"
 
 
+def sanitize_spreadsheet_df(df: pd.DataFrame) -> pd.DataFrame:
+    """Neutralize formula-leading characters in string cells so applicant free-text can't execute
+    as a formula when the exported .xlsx is opened in Excel/LibreOffice (CSV injection, CWE-1236)."""
+    def _esc(v):
+        if isinstance(v, str) and v[:1] in ("=", "+", "-", "@", "\t", "\r"):
+            return "'" + v
+        return v
+    return df.map(_esc)
+
+
 def setup_claude() -> ClaudeClient:
     """Claude Haiku client for the normalization scripts; key from ANTHROPIC_API_KEY."""
     return ClaudeClient(NORMALIZATION_MODEL, os.getenv("ANTHROPIC_API_KEY", ""))

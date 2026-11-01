@@ -16,7 +16,7 @@ import streamlit as st
 from info import MENTEE_COLUMNS, MENTOR_COLUMNS
 from matching import check_mentor_conflicts, hungarian_assignment
 from progress_ui import render_processing_summary
-from utils import is_debug_mode, show_debug_info
+from utils import is_debug_mode, sanitize_spreadsheet_df, show_debug_info
 from validation import analyze_score_distribution, validate_and_flag_matches
 from visualization import create_heatmap
 
@@ -36,10 +36,11 @@ def _matches_report_bytes(matches, mentees_df, mentors_df, assignments, reasonin
                 'Reasoning': reason,
             })
     output = BytesIO()
+    # Neutralize spreadsheet formulas in any applicant free-text before writing (CWE-1236).
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        pd.DataFrame(rows).to_excel(writer, sheet_name='Matches', index=False)
-        mentees_df.to_excel(writer, sheet_name='Mentees', index=False)
-        mentors_df.to_excel(writer, sheet_name='Mentors', index=False)
+        sanitize_spreadsheet_df(pd.DataFrame(rows)).to_excel(writer, sheet_name='Matches', index=False)
+        sanitize_spreadsheet_df(mentees_df).to_excel(writer, sheet_name='Mentees', index=False)
+        sanitize_spreadsheet_df(mentors_df).to_excel(writer, sheet_name='Mentors', index=False)
         if assignments:
             pd.DataFrame({
                 'Metric': ['Total Matches', 'Average Score', 'Min Score', 'Max Score', 'Generated At'],

@@ -8,6 +8,7 @@ APP = str(Path(__file__).resolve().parent.parent / "app.py")
 def test_missing_api_key_stops_with_error(monkeypatch):
     """No API key → main() shows a clear error and stops, before any step/rail renders."""
     monkeypatch.delenv("APP_ACCESS_PASSWORD", raising=False)
+    monkeypatch.setenv("ALLOW_NO_AUTH", "1")  # explicit dev opt-out past the fail-closed auth gate
     at = AppTest.from_file(APP, default_timeout=30).run()
     at.session_state["api_key"] = ""
     at.run()
@@ -19,6 +20,7 @@ def test_dead_end_run_shows_enabled_back_button(monkeypatch):
     """A run that can't proceed (here: start_processing set with no data) renders the locked
     rail plus an enabled '← Back to Generate' escape, so the user is never trapped."""
     monkeypatch.delenv("APP_ACCESS_PASSWORD", raising=False)
+    monkeypatch.setenv("ALLOW_NO_AUTH", "1")  # explicit dev opt-out past the fail-closed auth gate
     at = AppTest.from_file(APP, default_timeout=30).run()
     at.session_state["api_key"] = "x"          # pass the key gate
     at.session_state["mentees_df"] = None        # not ready -> dead-end

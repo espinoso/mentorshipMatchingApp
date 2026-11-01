@@ -13,6 +13,16 @@ from info import (
 )
 
 
+def sanitize_spreadsheet_df(df):
+    """Neutralize formula-leading characters in string cells so applicant free-text can't execute
+    as a formula when an exported .xlsx/.csv is opened in Excel/LibreOffice (CSV injection, CWE-1236)."""
+    def _esc(v):
+        if isinstance(v, str) and v[:1] in ("=", "+", "-", "@", "\t", "\r"):
+            return "'" + v
+        return v
+    return df.map(_esc)
+
+
 def validate_uploaded_file(df, file_type):
     """Validate uploaded files and show warnings"""
     warnings = []
