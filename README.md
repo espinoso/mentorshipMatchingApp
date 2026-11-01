@@ -32,12 +32,12 @@ Files are `.xlsx`. Real sample files live outside the repo (gitignored `samples/
 
 ## Running locally
 
-Requires **Python 3.11**.
+Requires **Python 3.12+**.
 
 ```bash
 git clone git@github.com:espinoso/mentorshipMatchingApp.git
 cd mentorshipMatchingApp
-python3.11 -m venv .venv && source .venv/bin/activate
+python3.12 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
