@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import jev_scoring
 from info import MENTEE_COLUMNS, MENTOR_COLUMNS
-from jev_scoring import JevError, score_matrix_jev
+from jev_scoring import JevError, _active_dimensions, score_matrix_jev
 
 
 def _ee():
@@ -148,3 +148,17 @@ def test_weights_change_the_blend():
     m, _ = score_matrix_jev(_rich_ee(), _rich_mo(), "k",
                             client=FakeClient(score=scores), weights={"skills": 100})
     assert m.loc["10", "1"] == 0
+
+
+def test_availability_and_style_activate_only_with_data():
+    base_ee = pd.DataFrame({MENTEE_COLUMNS['id']: [1], MENTEE_COLUMNS['field']: ['Bio']})
+    base_mo = pd.DataFrame({MENTOR_COLUMNS['id']: [10], MENTOR_COLUMNS['field']: ['Bio']})
+    assert "availability" not in _active_dimensions(base_ee, base_mo)  # columns absent (2025 data)
+    ee = base_ee.assign(**{MENTEE_COLUMNS['availability']: ['EST'], MENTEE_COLUMNS['style']: ['informal']})
+    mo = base_mo.assign(**{MENTOR_COLUMNS['availability']: ['EST'], MENTOR_COLUMNS['style']: ['structured']})
+    active = _active_dimensions(ee, mo)
+    assert "availability" in active and "style" in active        # 2026 data -> activated
+    # present but all "N/A" (older file after normalization) stays inactive
+    ee_na = base_ee.assign(**{MENTEE_COLUMNS['availability']: ['N/A']})
+    mo_na = base_mo.assign(**{MENTOR_COLUMNS['availability']: ['N/A']})
+    assert "availability" not in _active_dimensions(ee_na, mo_na)

@@ -54,7 +54,10 @@ MENTOR_COLUMNS = {
     'field': 'Mentor Field of expertise',
     'specialization': 'Mentor Specialization',
     'experience_years': 'Mentor Years of Professional Experience in his her Field',
-    'career_dev_experience': 'Mentor experience in career development'
+    'career_dev_experience': 'Mentor experience in career development',
+    'availability': 'Mentor Availability',
+    'meeting_frequency': 'Mentor Preferred Meeting Frequency',
+    'style': 'Mentor Preferred Mentoring Style'
 }
 
 # PRE column mapping (what to look for in PRE files)
@@ -70,7 +73,10 @@ PRE_COLUMN_MAPPING = {
     'specialization': ['specialization'],
     'hard_skills': ['specific hard skills', 'professional competencies'],
     'experience_years': ['years of professional experience'],
-    'career_dev_experience': ['areas where you feel comfortable mentoring', 'comfortable mentoring']
+    'career_dev_experience': ['areas where you feel comfortable mentoring', 'comfortable mentoring'],
+    'availability': ['availability by time zone', 'availability'],
+    'meeting_frequency': ['preferred meeting frequency', 'meeting frequency'],
+    'style': ['preferred mentoring style', 'mentoring style']
 }
 
 
@@ -201,7 +207,12 @@ def process_mentor_file(input_file: str, output_file: str = None, dry_run: bool 
         df_output[MENTOR_COLUMNS['career_dev_experience']] = df[pre_cols['career_dev_experience']].fillna("N/A")
     else:
         df_output[MENTOR_COLUMNS['career_dev_experience']] = "N/A"
-    
+
+    # New 2026 fields (availability / meeting frequency / mentoring style). Absent in older
+    # files -> "N/A", so the availability & style matching dimensions stay inactive on that data.
+    for key in ('availability', 'meeting_frequency', 'style'):
+        df_output[MENTOR_COLUMNS[key]] = df[pre_cols[key]].fillna("N/A") if pre_cols[key] else "N/A"
+
     print("   ✓ Copied simple columns")
     
     # Normalize institution types (dictionary lookup, no LLM, so no per-row progress output)
@@ -306,7 +317,8 @@ def process_mentor_file(input_file: str, output_file: str = None, dry_run: bool 
     column_order = [MENTOR_COLUMNS[key] for key in ['id', 'affiliation', 'country', 'current_position',
                                                      'institution_type', 'country_of_origin', 'alma_mater',
                                                      'education_level', 'field', 'specialization',
-                                                     'experience_years', 'career_dev_experience']]
+                                                     'experience_years', 'career_dev_experience',
+                                                     'availability', 'meeting_frequency', 'style']]
     df_output = df_output[column_order]
     print("   ✓ Columns reordered")
     
