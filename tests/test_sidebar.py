@@ -9,7 +9,8 @@ APP = str(Path(__file__).resolve().parent.parent / "app.py")
 
 def test_sidebar_exposes_weights_and_country_rules(monkeypatch):
     monkeypatch.delenv("APP_ACCESS_PASSWORD", raising=False)
-    monkeypatch.setenv("ALLOW_NO_AUTH", "1")
+    monkeypatch.setenv("ALLOW_NO_AUTH", "1")      # past the fail-closed auth gate
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")  # past the missing-key stop (CI has no secrets.toml)
     at = AppTest.from_file(APP, default_timeout=30).run()
 
     labels = [s.label for s in at.sidebar.slider]
