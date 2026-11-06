@@ -89,7 +89,8 @@ def generate_matrix_jev(mentees_df, mentors_df):
             bar.progress(frac, text=f"Scoring with Jev… {done}/{total_pairs} pairs")
 
     try:
-        matrix, unscored = score_matrix_jev(mentees_df, mentors_df, key, progress_cb=on_progress)
+        matrix, unscored = score_matrix_jev(mentees_df, mentors_df, key, progress_cb=on_progress,
+                                            weights=st.session_state.get("match_weights"))
     except JevError as e:
         bar.empty()
         st.error(f"❌ Jev scoring failed: {e}")
@@ -282,9 +283,20 @@ def render_rail(current: int, has_data: bool, has_results: bool, clickable: bool
         )
 
 
+_DIM_LABELS = {
+    "field_specialization": "Field & specialization",
+    "goals_mentoring": "Goals & mentoring fit",
+    "skills": "Skills overlap",
+    "level_seniority": "Level & seniority",
+    "availability": "Availability / time zone",
+    "style": "Style fit",
+}
+
+
 def render_sidebar() -> None:
-    """Settings live here, not as wizard steps: the few knobs an organizer touches. Scoring runs
-    on Jev (fixed rubric), so there is no model or rubric control."""
+    """Settings + the matching 'baremos'. Scoring is Jev (fixed rubric in code); the weight sliders
+    set how much each dimension counts in the per-pair blend. Country rules are a soft penalty."""
+    from jev_scoring import DEFAULT_WEIGHTS, DIMENSIONS
     with st.sidebar:
         st.header("⚙️ Settings")
         st.session_state.max_mentees_per_mentor = st.number_input(
@@ -295,12 +307,30 @@ def render_sidebar() -> None:
             step=1,
             help="The most mentees a single mentor can be assigned. Enforced during optimal assignment.",
         )
-        restrict_spain = st.checkbox(
-            "Spain ↔ Spain restriction",
-            value="spain" in st.session_state.get("country_restrictions", ["spain"]),
-            help="Don't match Spanish mentors to Spanish mentees. Needs a country column in the data.",
+
+        st.subheader("🌍 Country rule")
+        st.caption("Avoid same-country pairings when a good cross-country option exists (a soft "
+                   "preference, not a hard ban).")
+        current = st.session_state.get("country_restrictions", ["spain", "portugal"])
+        restrict_spain = st.checkbox("Avoid Spain ↔ Spain", value="spain" in current)
+        restrict_pt = st.checkbox("Avoid Portugal ↔ Portugal", value="portugal" in current)
+        st.session_state.country_restrictions = (
+            (["spain"] if restrict_spain else []) + (["portugal"] if restrict_pt else [])
         )
-        st.session_state.country_restrictions = ["spain"] if restrict_spain else []
+
+        st.subheader("⚖️ Matching weights")
+        st.caption("How much each dimension counts. Jev scores every dimension per pair; these set "
+                   "the blend (relative — they're normalized, and a dimension with no data drops out).")
+        stored = st.session_state.get("match_weights", DEFAULT_WEIGHTS)
+        weights = {}
+        for dim in DIMENSIONS:
+            weights[dim] = st.slider(
+                _DIM_LABELS.get(dim, dim), 0, 100,
+                int(stored.get(dim, DEFAULT_WEIGHTS[dim])), step=5,
+            )
+        st.session_state.match_weights = weights
+        if sum(weights.values()) == 0:
+            st.warning("All weights are 0 — dimensions will count equally.")
 
 
 def main():
@@ -396,7 +426,10 @@ def main():
     if 'max_mentees_per_mentor' not in st.session_state:
         st.session_state.max_mentees_per_mentor = 2
     if 'country_restrictions' not in st.session_state:
-        st.session_state.country_restrictions = ["spain"]
+        st.session_state.country_restrictions = ["spain", "portugal"]
+    if 'match_weights' not in st.session_state:
+        from jev_scoring import DEFAULT_WEIGHTS
+        st.session_state.match_weights = dict(DEFAULT_WEIGHTS)
     if 'mentee_search' not in st.session_state:
         st.session_state.mentee_search = ""
     if 'reset_counter' not in st.session_state:
