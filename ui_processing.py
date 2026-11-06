@@ -13,6 +13,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
+from anonymize import display_name
 from info import MENTEE_COLUMNS, MENTOR_COLUMNS
 from matching import apply_country_restrictions, check_mentor_conflicts, hungarian_assignment
 from utils import is_debug_mode, sanitize_spreadsheet_df, show_debug_info
@@ -20,26 +21,57 @@ from validation import analyze_score_distribution, validate_and_flag_matches
 from visualization import create_heatmap
 
 
-def _matches_report_bytes(matches, mentees_df, mentors_df, assignments, reasoning_by_pair=None):
+def _identities(entity: str) -> dict:
+    """The session-only {ID -> name/email/LinkedIn} map for 'mentee' or 'mentor' (empty if none)."""
+    return st.session_state.get(f"identities_{entity}", {})
+
+
+def _both_identities() -> dict:
+    """Both identity maps, for de-anonymizing the exported report locally."""
+    return {"mentee": _identities("mentee"), "mentor": _identities("mentor")}
+
+
+def _matches_report_bytes(matches, mentees_df, mentors_df, assignments, reasoning_by_pair=None,
+                          identities=None):
     """Build the Excel report (Matches/Mentees/Mentors/Summary). reasoning_by_pair, when given,
-    is {(str mentee_id, str mentor_id): text} and fills the Reasoning column; otherwise it's blank."""
+    is {(str mentee_id, str mentor_id): text} and fills the Reasoning column; otherwise it's blank.
+    identities {"mentee": map, "mentor": map} de-anonymizes the report locally (name/email/LinkedIn):
+    the AIs never saw these — they come from this session's memory only."""
+    ident = identities or {}
+    ee, mo = ident.get("mentee", {}), ident.get("mentor", {})
     rows = []
     for md in matches:
+        eid = str(md['mentee_id'])
         for m in md['matches']:
-            reason = ""
-            if reasoning_by_pair:
-                reason = reasoning_by_pair.get((str(md['mentee_id']), str(m['mentor_id'])), "")
+            tid = str(m['mentor_id'])
+            reason = reasoning_by_pair.get((eid, tid), "") if reasoning_by_pair else ""
             rows.append({
-                'Mentee_ID': md['mentee_id'], 'Rank': m['rank'], 'Mentor_ID': m['mentor_id'],
+                'Mentee_ID': md['mentee_id'],
+                'Mentee_Name': ee.get(eid, {}).get('name', ''), 'Mentee_Email': ee.get(eid, {}).get('email', ''),
+                'Rank': m['rank'], 'Mentor_ID': m['mentor_id'],
+                'Mentor_Name': mo.get(tid, {}).get('name', ''), 'Mentor_Email': mo.get(tid, {}).get('email', ''),
+                'Mentor_LinkedIn': mo.get(tid, {}).get('linkedin', ''),
                 'Match_Percentage': m['match_percentage'], 'Match_Quality': m['match_quality'],
                 'Reasoning': reason,
             })
+
+    def _with_identity(df, id_key, idmap, fields):
+        """Prepend captured Name/Email(/LinkedIn) columns, looked up by ID (no-op without a map)."""
+        out = df.copy()
+        if idmap:
+            ids = out[id_key].astype(str)
+            for pos, fld in enumerate(fields, start=1):
+                out.insert(pos, fld.capitalize(), ids.map(lambda i, f=fld: idmap.get(i, {}).get(f, '')))
+        return out
+
+    ee_sheet = _with_identity(mentees_df, MENTEE_COLUMNS['id'], ee, ('name', 'email'))
+    mo_sheet = _with_identity(mentors_df, MENTOR_COLUMNS['id'], mo, ('name', 'email', 'linkedin'))
     output = BytesIO()
     # Neutralize spreadsheet formulas in any applicant free-text before writing (CWE-1236).
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         sanitize_spreadsheet_df(pd.DataFrame(rows)).to_excel(writer, sheet_name='Matches', index=False)
-        sanitize_spreadsheet_df(mentees_df).to_excel(writer, sheet_name='Mentees', index=False)
-        sanitize_spreadsheet_df(mentors_df).to_excel(writer, sheet_name='Mentors', index=False)
+        sanitize_spreadsheet_df(ee_sheet).to_excel(writer, sheet_name='Mentees', index=False)
+        sanitize_spreadsheet_df(mo_sheet).to_excel(writer, sheet_name='Mentors', index=False)
         if assignments:
             pd.DataFrame({
                 'Metric': ['Total Matches', 'Average Score', 'Min Score', 'Max Score', 'Generated At'],
@@ -187,6 +219,7 @@ def _match_rows(matches, mentees_df, mentors_df, flagged_map):
     # Match ids as strings — assignment ids are strings while the df id column may be int.
     mentee_ids = mentees_df[MENTEE_COLUMNS['id']].astype(str)
     mentor_ids = mentors_df[MENTOR_COLUMNS['id']].astype(str)
+    ee_idn, mo_idn = _identities("mentee"), _identities("mentor")  # names, if captured this session
     rows = []
     for md in matches:
         mid = md['mentee_id']
@@ -199,6 +232,8 @@ def _match_rows(matches, mentees_df, mentors_df, flagged_map):
             issues = flagged_map.get((str(mid), str(tid)), [])
             rows.append({
                 'mentee_id': mid, 'mentor_id': tid,
+                'mentee_name': display_name(ee_idn, mid, "Mentee "),
+                'mentor_name': display_name(mo_idn, tid, "Mentor "),
                 'score': m['match_percentage'], 'quality': m['match_quality'],
                 'mentee_field': mentee_field, 'mentor_field': _col_val(trow, MENTOR_COLUMNS['field']) or '',
                 'mentee_country': mentee_country,
@@ -268,12 +303,13 @@ def _render_match_card(r):
     """One match card: header (ids, country, field) + badge + on-demand reasoning."""
     # Survey-derived text is escaped and the CSS class is allowlisted (values render via unsafe HTML).
     cls = r["quality"].lower() if r["quality"] in _QUALITY_ORDER else "fair"
-    mentee_id = html.escape(str(r["mentee_id"]))
-    mentor_id = html.escape(str(r["mentor_id"]))
+    # Labels show the captured name when present, else a stable "Mentee 12" fallback.
+    mentee_label = html.escape(str(r.get("mentee_name") or f"Mentee {r['mentee_id']}"))
+    mentor_label = html.escape(str(r.get("mentor_name") or f"Mentor {r['mentor_id']}"))
     quality = html.escape(str(r["quality"]))
     header = (
-        f'<h4>Mentee {mentee_id} {_country_token(r["mentee_country"])} {_field_label(r["mentee_field"])}'
-        f' → Mentor {mentor_id} {_country_token(r["mentor_country"])} {_field_label(r["mentor_field"])}</h4>'
+        f'<h4>{mentee_label} {_country_token(r["mentee_country"])} {_field_label(r["mentee_field"])}'
+        f' → {mentor_label} {_country_token(r["mentor_country"])} {_field_label(r["mentor_field"])}</h4>'
         f'<p><span class="percentage-badge {cls}">{int(r["score"])}% - {quality}</span></p>'
     )
     with st.container(border=True):
@@ -537,7 +573,8 @@ def render_processing_tab():
         st.download_button(
             "📥 Download matches",
             _matches_report_bytes(st.session_state.matches, st.session_state.mentees_df,
-                                  st.session_state.mentors_df, st.session_state.assignments),
+                                  st.session_state.mentors_df, st.session_state.assignments,
+                                  identities=_both_identities()),
             f"matches_{stamp}.xlsx", xlsx_mime, width='stretch',
         )
     with col_reason:
@@ -550,7 +587,8 @@ def render_processing_tab():
                 rby = {(str(k[0]), str(k[1])): v for k, v in rdict.items()}
                 st.session_state.export_with_reasoning = _matches_report_bytes(
                     st.session_state.matches, st.session_state.mentees_df,
-                    st.session_state.mentors_df, st.session_state.assignments, rby)
+                    st.session_state.mentors_df, st.session_state.assignments, rby,
+                    identities=_both_identities())
         if st.session_state.get("export_with_reasoning"):
             st.download_button(
                 "📥 Download matches + reasonings",
@@ -623,7 +661,10 @@ def render_review_tab():
     def _hit(r):
         if not query:
             return True
-        return query in f"{r['mentee_id']} {r['mentor_id']} {r['mentee_field']} {r['mentor_field']}".lower()
+        return query in (
+            f"{r['mentee_id']} {r['mentor_id']} {r['mentee_field']} {r['mentor_field']} "
+            f"{r.get('mentee_name', '')} {r.get('mentor_name', '')}"
+        ).lower()
 
     shown = [r for r in rows if _hit(r) and (not review_only or r['flagged'])]
     if sort_by == "Score: high → low":

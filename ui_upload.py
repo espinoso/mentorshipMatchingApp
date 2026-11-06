@@ -146,6 +146,7 @@ def _reset_entity(file_type: FileType):
     st.session_state[get_state_key(file_type, 'processing_complete')] = False
     st.session_state[get_state_key(file_type, 'processing')] = False
     st.session_state[FILE_TYPE_CONFIG[file_type]['df_key']] = None
+    st.session_state[f'identities_{file_type}'] = {}  # drop the captured names for this entity
     for k in ('matrix_df', 'assignments', 'matches'):  # a removed entity invalidates any results
         st.session_state[k] = None
 
@@ -219,6 +220,8 @@ def run_file_processing(file_type: FileType):
         config = FILE_TYPE_CONFIG[file_type]
         st.session_state[get_state_key(file_type, 'processed_df')] = processed_df
         _store_df(config['df_key'], processed_df)
+        # Name/email/LinkedIn, keyed by ID — session memory only, never persisted or sent to the AIs.
+        st.session_state[f'identities_{file_type}'] = (processing_info or {}).get('identities', {})
         st.session_state[get_state_key(file_type, 'processing_info')] = processing_info
         st.session_state[get_state_key(file_type, 'cancel_flag')]['cancelled'] = False
         st.session_state[get_state_key(file_type, 'processing_complete')] = True

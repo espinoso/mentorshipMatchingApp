@@ -427,14 +427,30 @@ def process_file_with_progress(
                 
                 # Read the output file into DataFrame
                 processed_df = pd.read_excel(temp_output_path)
-                
+
+                # Capture PII (name/email/LinkedIn) into a session-only identity map keyed by the
+                # assigned ID, while the raw input is still on disk. IDs are positional, so raw rows
+                # align 1:1 with processed IDs; a length mismatch (shouldn't happen) yields no map.
+                # The AIs never see this — it's stitched back in only for local display/export.
+                from anonymize import capture_identities
+                from info import MENTEE_COLUMNS, MENTOR_COLUMNS
+                id_col = (MENTEE_COLUMNS if file_type == 'mentee' else MENTOR_COLUMNS)['id']
+                try:
+                    raw_df = shared_utils.read_input_sheet(temp_input_path)
+                    processing_info['identities'] = (
+                        capture_identities(raw_df, processed_df[id_col].tolist(), raw_df.columns)
+                        if len(raw_df) == len(processed_df) else {}
+                    )
+                except Exception:  # identity capture must never break normalization
+                    processing_info['identities'] = {}
+
                 # Clean up temp files
                 try:
                     os.unlink(temp_input_path)
                     os.unlink(temp_output_path)
                 except:
                     pass
-                
+
                 return processed_df, output_file, processing_info
                 
             except Exception:
