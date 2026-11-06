@@ -54,12 +54,15 @@ MENTEE_COLUMNS = {
     'languages': 'Mentee Languages spoken fluently',
     'guidance_areas': 'Mentee Areas where guidance is needed',
     'career_goals': 'Mentee Career goals for the next 2 years',
-    'other_info': 'Mentee other relevant info'
+    'other_info': 'Mentee other relevant info',
+    'availability': 'Mentee Availability',
+    'meeting_frequency': 'Mentee Preferred Meeting Frequency',
+    'style': 'Mentee Preferred Communication Style'
 }
 
 # PRE column mapping (what to look for in PRE files)
 PRE_COLUMN_MAPPING = {
-    'affiliation': ['university where you are currently studying', 'affiliation'],
+    'affiliation': ['university where you are currently studying', 'institution you are affiliated', 'affiliation'],
     'country': ['affiliated university', 'affiliated institution'],
     'education_level': ['highest educational level', 'highest education level'],
     'current_program': ['current education program'],
@@ -69,7 +72,10 @@ PRE_COLUMN_MAPPING = {
     'languages': ['languages spoken fluently'],
     'guidance_areas': ['areas where guidance is needed'],
     'career_goals': ['career goals for the next 2-3 years', 'career goals'],
-    'other_info': ['is there anything else', 'anything else']
+    'other_info': ['is there anything else', 'anything else'],
+    'availability': ['availability by time zone', 'availability'],
+    'meeting_frequency': ['preferred meeting frequency', 'meeting frequency'],
+    'style': ['preferred communication style', 'communication style']
 }
 
 
@@ -257,7 +263,12 @@ def process_mentee_file(input_file: str, output_file: str = None, dry_run: bool 
         )
     else:
         df_output[MENTEE_COLUMNS['other_info']] = "N/A"
-    
+
+    # New 2026 fields (availability / meeting frequency / communication style). Absent in older
+    # files -> "N/A", so the availability & style matching dimensions stay inactive on that data.
+    for key in ('availability', 'meeting_frequency', 'style'):
+        df_output[MENTEE_COLUMNS[key]] = df[pre_cols[key]].fillna("N/A") if pre_cols[key] else "N/A"
+
     print("   ✓ Copied simple columns")
     
     # Save original Field of expertise for merging (before we overwrite it)
@@ -330,9 +341,10 @@ def process_mentee_file(input_file: str, output_file: str = None, dry_run: bool 
     
     # Reorder columns to match POST format
     print("\n7. Reordering columns...")
-    column_order = [MENTEE_COLUMNS[key] for key in ['id', 'affiliation', 'country', 'education_level', 
-                                                     'current_program', 'field', 'specialization', 
-                                                     'languages', 'guidance_areas', 'career_goals', 'other_info']]
+    column_order = [MENTEE_COLUMNS[key] for key in ['id', 'affiliation', 'country', 'education_level',
+                                                     'current_program', 'field', 'specialization',
+                                                     'languages', 'guidance_areas', 'career_goals', 'other_info',
+                                                     'availability', 'meeting_frequency', 'style']]
     df_output = df_output[column_order]
     print("   ✓ Columns reordered")
     

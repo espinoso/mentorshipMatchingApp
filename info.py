@@ -15,7 +15,10 @@ MENTOR_COLUMNS = {
     'field': 'Mentor Field of expertise',
     'specialization': 'Mentor Specialization',
     'experience_years': 'Mentor Years of Professional Experience in his her Field',
-    'career_dev_experience': 'Mentor experience in career development'
+    'career_dev_experience': 'Mentor experience in career development',
+    'availability': 'Mentor Availability',
+    'meeting_frequency': 'Mentor Preferred Meeting Frequency',
+    'style': 'Mentor Preferred Mentoring Style',
 }
 
 MENTEE_COLUMNS = {
@@ -29,7 +32,10 @@ MENTEE_COLUMNS = {
     'languages': 'Mentee Languages spoken fluently',
     'guidance_areas': 'Mentee Areas where guidance is needed',
     'career_goals': 'Mentee Career goals for the next 2 years',
-    'other_info': 'Mentee other relevant info'
+    'other_info': 'Mentee other relevant info',
+    'availability': 'Mentee Availability',
+    'meeting_frequency': 'Mentee Preferred Meeting Frequency',
+    'style': 'Mentee Preferred Communication Style',
 }
 
 # =====================================================================
