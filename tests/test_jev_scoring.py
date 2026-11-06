@@ -27,21 +27,25 @@ class _Answer:
 
 
 class _Resp:
-    def __init__(self, score):
-        self.scores = {"match": _Answer(score)}
+    def __init__(self, scores):
+        self.scores = scores  # {question_name: _Answer}
 
 
 class FakeClient:
-    """Returns score_fn(state) as the Score answer, or raises when fail_fn(state) is True."""
+    """Answers every requested question. `score` is a constant or a {dim: value} map (0..4);
+    raises when fail_fn(state) is True. Records the questions asked and the states seen."""
 
     def __init__(self, score=4.0, fail_fn=None):
-        self.score, self.fail_fn, self.states = score, fail_fn, []
+        self.score, self.fail_fn, self.states, self.questions_seen = score, fail_fn, [], []
 
     def system_one(self, state, questions, **kwargs):
         self.states.append(state)
+        self.questions_seen.append(sorted(questions))
         if self.fail_fn and self.fail_fn(state):
             raise RuntimeError("jev down")
-        return _Resp(self.score)
+        def val(dim):
+            return self.score[dim] if isinstance(self.score, dict) else self.score
+        return _Resp({d: _Answer(val(d)) for d in questions})
 
     def close(self):
         pass
@@ -108,4 +112,39 @@ def test_progress_cb_reaches_total():
     seen = []
     score_matrix_jev(_ee(), _mo(), "k", client=FakeClient(), progress_cb=lambda d, t: seen.append((d, t)))
     assert seen[-1] == (4, 4)  # 2x2 pairs, final tick is done==total
-    assert len(seen) == 4
+
+
+def _rich_ee():
+    return pd.DataFrame({
+        MENTEE_COLUMNS['id']: [1], MENTEE_COLUMNS['field']: ["Biology"],
+        MENTEE_COLUMNS['specialization']: ["Genetics"], MENTEE_COLUMNS['education_level']: ["Master's"],
+        MENTEE_COLUMNS['guidance_areas']: ["career paths"], MENTEE_COLUMNS['career_goals']: ["industry"],
+    })
+
+
+def _rich_mo():
+    return pd.DataFrame({
+        MENTOR_COLUMNS['id']: [10], MENTOR_COLUMNS['field']: ["Biology"],
+        MENTOR_COLUMNS['specialization']: ["Genetics"], MENTOR_COLUMNS['education_level']: ["PhD"],
+        MENTOR_COLUMNS['experience_years']: ["10"], MENTOR_COLUMNS['current_position']: ["Professor"],
+        MENTOR_COLUMNS['career_dev_experience']: ["mentoring students"],
+    })
+
+
+def test_weighted_blend_over_active_dimensions():
+    # This data activates 4 dims (availability/style have no columns -> dropped).
+    scores = {"field_specialization": 4, "goals_mentoring": 2, "skills": 0, "level_seniority": 4}
+    client = FakeClient(score=scores)
+    m, _ = score_matrix_jev(_rich_ee(), _rich_mo(), "k", client=client)
+    assert client.questions_seen[0] == sorted(scores)  # only dims with data are asked
+    # defaults 30/20/20/15 over the 4 active dims, renormalized /85:
+    # (100*30 + 50*20 + 0*20 + 100*15)/85 = 64.7 -> 65
+    assert m.loc["10", "1"] == 65
+
+
+def test_weights_change_the_blend():
+    scores = {"field_specialization": 4, "goals_mentoring": 2, "skills": 0, "level_seniority": 4}
+    # put all weight on skills (scored 0) -> blended 0, proving the sliders actually drive the score
+    m, _ = score_matrix_jev(_rich_ee(), _rich_mo(), "k",
+                            client=FakeClient(score=scores), weights={"skills": 100})
+    assert m.loc["10", "1"] == 0
