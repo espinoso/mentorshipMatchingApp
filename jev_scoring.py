@@ -40,7 +40,8 @@ DIMENSIONS = {
     },
     "skills": {
         "instructions": "How much do the mentee's and mentor's hard skills and competencies overlap?",
-        "ee": ("specialization", "skills"), "mo": ("specialization", "skills"),
+        # normalization folds hard skills into the specialization column, so that's the field to read.
+        "ee": ("specialization",), "mo": ("specialization",),
     },
     "level_seniority": {
         "instructions": ("Is the mentor suitably ahead of the mentee in seniority and experience "
@@ -66,7 +67,7 @@ DEFAULT_WEIGHTS = {
 
 # Every profile field Jev may see (per-side; _profile skips keys a side lacks or that are empty).
 _PROFILE_FIELDS = (
-    "field", "specialization", "skills", "education_level", "affiliation", "country",
+    "field", "specialization", "education_level", "affiliation", "country",
     "guidance_areas", "career_goals", "experience_years", "current_position",
     "availability", "meeting_frequency", "style",
 )
