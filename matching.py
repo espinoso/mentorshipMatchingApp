@@ -7,6 +7,7 @@ old `from matching import ...` call sites working with a single implementation.
 from matching_core import (
     AssignmentResult,
     apply_country_restrictions,
+    apply_origin_affinity,
     check_mentor_conflicts,
     hungarian_assignment,
 )
@@ -14,6 +15,7 @@ from matching_core import (
 __all__ = [
     "AssignmentResult",
     "apply_country_restrictions",
+    "apply_origin_affinity",
     "check_mentor_conflicts",
     "hungarian_assignment",
 ]

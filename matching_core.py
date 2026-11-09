@@ -156,3 +156,43 @@ def apply_country_restrictions(
                     }
                 )
     return out, filtered
+
+
+# A mentor whose country of ORIGIN matches the mentee's affiliated-university country gets a
+# small boost: a Spain-born mentor working abroad knows the Spanish system, so they fit a
+# student at a Spanish university a little better. Deliberately smaller than SAME_COUNTRY_PENALTY
+# so it never overrides the affiliation rule (a mentor working AND a student studying in Spain is
+# still avoided even if the mentor is Spanish by origin). Origin is used only as this positive.
+ORIGIN_AFFINITY_BONUS = 10.0
+
+
+def _by_id(df: pd.DataFrame, id_key: str, value_key: str) -> dict[str, str]:
+    """Map string ID -> a normalized string column value ("" when missing)."""
+    return {
+        str(i): "" if pd.isna(c) else str(c).strip().lower()
+        for i, c in zip(df[id_key], df[value_key], strict=True)
+    }
+
+
+def apply_origin_affinity(matrix_df, mentees_df, mentors_df, bonus: float = ORIGIN_AFFINITY_BONUS):
+    """Add `bonus` (clipped to 100) to cells where the mentor's country of origin matches the
+    mentee's affiliated-university country; returns (matrix copy, cells boosted). A no-op when a
+    needed column is absent. Complements apply_country_restrictions, which penalizes shared
+    AFFILIATION — origin never restricts, it only gently prefers."""
+    out = matrix_df.copy()
+    if MENTOR_COLUMNS["country_of_origin"] not in mentors_df.columns or MENTEE_COLUMNS["country"] not in mentees_df.columns:
+        return out, 0
+    mentor_origin = _by_id(mentors_df, MENTOR_COLUMNS["id"], MENTOR_COLUMNS["country_of_origin"])
+    mentee_aff = _by_id(mentees_df, MENTEE_COLUMNS["id"], MENTEE_COLUMNS["country"])
+    boosted = 0
+    for mentor_id in out.index:
+        origin = mentor_origin.get(str(mentor_id), "")
+        if not origin:
+            continue
+        for mentee_id in out.columns:
+            if mentee_aff.get(str(mentee_id), "") == origin:
+                score = out.loc[mentor_id, mentee_id]
+                if pd.notna(score):
+                    out.loc[mentor_id, mentee_id] = min(100.0, float(score) + bonus)
+                    boosted += 1
+    return out, boosted
