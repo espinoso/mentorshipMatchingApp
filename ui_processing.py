@@ -15,7 +15,12 @@ import streamlit as st
 
 from anonymize import display_name
 from info import MENTEE_COLUMNS, MENTOR_COLUMNS
-from matching import apply_country_restrictions, check_mentor_conflicts, hungarian_assignment
+from matching import (
+    apply_country_restrictions,
+    apply_origin_affinity,
+    check_mentor_conflicts,
+    hungarian_assignment,
+)
 from utils import is_debug_mode, sanitize_spreadsheet_df, show_debug_info
 from validation import analyze_score_distribution, validate_and_flag_matches
 from visualization import create_heatmap
@@ -215,7 +220,8 @@ def _numeric(value):
 def _match_rows(matches, mentees_df, mentors_df, flagged_map):
     """Flatten matches into rows carrying the fields the list filters/sorts/renders on.
     flagged_map is {(mentee, mentor): [reasons]}; a row's issues drive its review note.
-    Mentee country = affiliated-university country; mentor country = country of origin."""
+    Both countries shown are affiliation (student's university, mentor's institution) — the
+    pair the country rule compares."""
     # Match ids as strings — assignment ids are strings while the df id column may be int.
     mentee_ids = mentees_df[MENTEE_COLUMNS['id']].astype(str)
     mentor_ids = mentors_df[MENTOR_COLUMNS['id']].astype(str)
@@ -237,7 +243,9 @@ def _match_rows(matches, mentees_df, mentors_df, flagged_map):
                 'score': m['match_percentage'], 'quality': m['match_quality'],
                 'mentee_field': mentee_field, 'mentor_field': _col_val(trow, MENTOR_COLUMNS['field']) or '',
                 'mentee_country': mentee_country,
-                'mentor_country': _col_val(trow, MENTOR_COLUMNS['country_of_origin']),
+                # Show the mentor's AFFILIATION country — the one the country rule compares against
+                # the student's university country — so the card matches what drove the match.
+                'mentor_country': _col_val(trow, MENTOR_COLUMNS['country']),
                 'flagged': bool(issues), 'issues': issues,
             })
     return rows
@@ -480,6 +488,13 @@ def render_processing_tab():
                         st.warning(f"⚠️ Country rule not applied: {penalized[0]['skipped']}.")
                     else:
                         st.caption(f"🌍 Country rule deprioritized {len(penalized)} same-country pair(s) before assignment.")
+                # Gently prefer mentors whose country of origin matches the student's country
+                # (e.g. a Spanish mentor abroad knows the Spanish system). Origin never restricts.
+                matrix_df, boosted = apply_origin_affinity(
+                    matrix_df, st.session_state.mentees_df, st.session_state.mentors_df)
+                if boosted:
+                    st.caption(f"🌐 Gave a small boost to {boosted} pair(s) where the mentor's origin "
+                               "matches the student's country.")
                 st.session_state.matrix_df = matrix_df
                 max_mentees_per_mentor = st.session_state.get('max_mentees_per_mentor', 2)
                 result = hungarian_assignment(matrix_df, max_mentees_per_mentor=max_mentees_per_mentor)
